@@ -1,0 +1,9 @@
+requests>=2.31.0
+rich>=13.0.0
+questionary>=2.0.0
+InquirerPy>=0.3.4
+readchar>=4.0.0
+Pillow>=10.0.0
+rich-pixels>=3.0.0
+ascii_magic>=2.3.0
+textual>=0.40.0
