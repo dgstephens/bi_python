@@ -4,6 +4,7 @@ Public API
 ----------
 run_bin_form(existing=None)                              -> Optional[dict]
 run_item_form(bins, existing=None, preselect_bin_id=None) -> Optional[dict]
+run_search_form()                                        -> Optional[str]
 
 Returns a dict of field values on save, or None on cancel.
 All fields are shown at once; Tab / Shift+Tab to move between them,
@@ -16,40 +17,30 @@ from typing import List, Optional
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer
-from textual.widgets import Button, Input, Label, Select, Static, Switch
+from textual.widgets import Input, Label, Select, Static, Switch
 
 
 # ── Retro widget subclasses ─────────────────────────────────────────────────────
-# Textual's Input and Select DEFAULT_CSS overrides App-level CSS color rules in
-# newer versions. Setting inline styles in on_mount / on_focus / on_blur is the
-# reliable workaround.
+# We do NOT override Input background/color in CSS — Textual's dark-theme
+# defaults give white text on a contrasting background which is readable.
+# We only tweak the foreground color on focus via inline styles, which reliably
+# highlights the active field even if the CSS color rules lose the specificity
+# battle against Input.DEFAULT_CSS.
 
 class RetroInput(Input):
-    def on_mount(self) -> None:
-        self.styles.color = "white"
-        self.styles.background = "#000050"
-
     def on_focus(self) -> None:
-        self.styles.color = "#ffff55"
-        self.styles.background = "#000068"
+        self.styles.color = "#ffff55"   # yellow when active
 
     def on_blur(self) -> None:
         self.styles.color = "white"
-        self.styles.background = "#000050"
 
 
 class RetroSelect(Select):
-    def on_mount(self) -> None:
-        self.styles.color = "white"
-        self.styles.background = "#000050"
-
     def on_focus(self) -> None:
         self.styles.color = "#ffff55"
-        self.styles.background = "#000068"
 
     def on_blur(self) -> None:
         self.styles.color = "white"
-        self.styles.background = "#000050"
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -126,14 +117,10 @@ Input {
     width: 1fr;
     height: 1;
     border: none;
-    background: #000050;
-    color: white;
     padding: 0 1;
 }
 Select {
     width: 1fr;
-    background: #000050;
-    color: white;
     border: none;
 }
 Switch {
@@ -173,28 +160,12 @@ Switch:focus {
     background: #000080;
     padding-left: 1;
 }
-#buttons {
-    height: 3;
-    align: center middle;
+#footer {
+    height: 2;
     background: #000080;
     border-top: solid #005588;
-    margin-top: 1;
-}
-Button {
-    background: #000080;
-    color: #55ffff;
-    border: solid #005588;
-    margin: 0 2;
-    min-width: 14;
-}
-Button:focus {
-    background: #000060;
-    color: #ffff55;
-    border: solid #55ffff;
-}
-Button.-primary {
-    color: #ffff55;
-    border: solid #55ffff;
+    padding: 0 2;
+    align: left middle;
 }
 """
 
@@ -217,7 +188,7 @@ class _BinFormApp(App):
         title = f"BinInventory  --  {'Edit Bin: ' + b['binName'] if b else 'New Bin'}"
         yield Static(title, id="form-title")
         yield Static(
-            "Tab/Shift+Tab: move   Ctrl+S: save   Esc: cancel",
+            "Tab/Shift+Tab: move between fields",
             id="form-hint",
         )
         current_img = b.get("image", "")
@@ -254,9 +225,11 @@ class _BinFormApp(App):
                 yield Label("New img :", classes="lbl")
                 ph = "file path (leave blank to keep current)" if current_img else "file path or leave blank"
                 yield RetroInput(value="", id="image_path", placeholder=ph)
-        with Horizontal(id="buttons"):
-            yield Button("[ SAVE ]", variant="primary", id="save")
-            yield Button("[ CANCEL ]", id="cancel")
+        yield Static(
+            "  [bold cyan]Ctrl+S[/bold cyan]  Save       "
+            "[bold cyan]Esc[/bold cyan]  Cancel",
+            id="footer",
+        )
 
     def on_mount(self) -> None:
         self.query_one("#bin_name", Input).focus()
@@ -279,12 +252,6 @@ class _BinFormApp(App):
 
     def action_cancel(self) -> None:
         self.exit(None)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save":
-            self.action_save()
-        elif event.button.id == "cancel":
-            self.action_cancel()
 
 
 # ── Item form ──────────────────────────────────────────────────────────────────
@@ -312,7 +279,7 @@ class _ItemFormApp(App):
         title = f"BinInventory  --  {'Edit Item: ' + it['item'] if it else 'New Item'}"
         yield Static(title, id="form-title")
         yield Static(
-            "Tab/Shift+Tab: move   Ctrl+S: save   Esc: cancel",
+            "Tab/Shift+Tab: move between fields",
             id="form-hint",
         )
 
@@ -382,9 +349,11 @@ class _ItemFormApp(App):
             with Horizontal(classes="row"):
                 yield Label("New imgs :", classes="lbl")
                 yield RetroInput(value="", id="new_images", placeholder="comma-separated file paths")
-        with Horizontal(id="buttons"):
-            yield Button("[ SAVE ]", variant="primary", id="save")
-            yield Button("[ CANCEL ]", id="cancel")
+        yield Static(
+            "  [bold cyan]Ctrl+S[/bold cyan]  Save       "
+            "[bold cyan]Esc[/bold cyan]  Cancel",
+            id="footer",
+        )
 
     def on_mount(self) -> None:
         self.query_one("#item_name", Input).focus()
@@ -438,12 +407,6 @@ class _ItemFormApp(App):
     def action_cancel(self) -> None:
         self.exit(None)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save":
-            self.action_save()
-        elif event.button.id == "cancel":
-            self.action_cancel()
-
 
 # ── Search form ────────────────────────────────────────────────────────────────
 
@@ -460,9 +423,11 @@ class _SearchFormApp(App):
             with Horizontal(classes="row"):
                 yield Label("Search :", classes="lbl lbl-req")
                 yield RetroInput(id="query", placeholder="type to search...")
-        with Horizontal(id="buttons"):
-            yield Button("[ SEARCH ]", variant="primary", id="search")
-            yield Button("[ CANCEL ]", id="cancel")
+        yield Static(
+            "  [bold cyan]Enter[/bold cyan]  Search       "
+            "[bold cyan]Esc[/bold cyan]  Back",
+            id="footer",
+        )
 
     def on_mount(self) -> None:
         self.query_one("#query", Input).focus()
@@ -473,13 +438,6 @@ class _SearchFormApp(App):
 
     def action_cancel(self) -> None:
         self.exit(None)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "search":
-            query = self.query_one("#query", Input).value.strip()
-            self.exit(query if query else None)
-        elif event.button.id == "cancel":
-            self.action_cancel()
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
