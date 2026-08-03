@@ -56,9 +56,9 @@ def _render_ansi(img) -> None:
     try:
         from rich_pixels import Pixels
         w = _target_width()
-        # Terminal characters are ~2× taller than wide, so halve the height
+        # Terminal characters are ~2× taller than wide; 0.75 gives a natural aspect ratio
         aspect = img.height / img.width
-        h = max(1, int(w * aspect * 0.5))
+        h = max(1, int(w * aspect * 0.75))
         pixels = Pixels.from_image(img, resize=(w, h))
         console.print(pixels)
     except ImportError:

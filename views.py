@@ -50,6 +50,11 @@ def fmt_date(date_str: Optional[str]) -> str:
         return date_str[:10] if len(date_str) >= 10 else date_str
 
 
+def _clear() -> None:
+    """Clear the terminal screen."""
+    os.system("clear" if os.name != "nt" else "cls")
+
+
 def _header(title: str = "") -> None:
     """Consistent full-width rule with app name and optional page title."""
     if title:
@@ -220,7 +225,7 @@ def _item_images(item: dict) -> List[str]:
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
 def login_view(cfg: dict, client: api_module.BinInventoryAPI) -> dict:
-    console.print()
+    _clear()
     _header("Login")
     console.print("  [cyan]Personal inventory management[/cyan]")
     console.print()
@@ -290,14 +295,11 @@ def main_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
         try:
             if dest == "bins":
-                bins_menu(cfg, client)
-                dest = "main"
+                bins_menu(cfg, client); dest = "main"
             elif dest == "items":
-                all_items_menu(cfg, client)
-                dest = "main"
+                all_items_menu(cfg, client); dest = "main"
             elif dest == "search":
-                search_menu(cfg, client)
-                dest = "main"
+                search_menu(cfg, client); dest = "main"
             else:
                 dest = _main_dispatch(cfg, client)
         except NavigateTo as e:
@@ -315,13 +317,12 @@ def _main_dispatch(cfg: dict, client: api_module.BinInventoryAPI) -> str:
     except APIError:
         item_count = "?"
 
-    console.print()
+    _clear()
     _header()
     console.print(
         f"  [cyan]User[/cyan]  : [white]{cfg.get('email', '')}[/white]   "
         f"[cyan]Items[/cyan] : [white]{item_count}[/white]"
     )
-    console.print()
 
     mode = cfg.get("image_mode", "none")
     mode_label = {"none": "No images", "ansi": "ANSI color", "ascii": "ASCII art"}.get(mode, mode)
@@ -388,7 +389,7 @@ def bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             {"name": "<- Back",   "value": ("back", None)},
         ]
 
-        console.print()
+        _clear()
         _header("My Bins")
         result = _fuzzy_pick(f"{len(bins)} bin(s) — type to filter, arrows to scroll:", choices)
         if result is None:
@@ -406,7 +407,7 @@ def bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
 def bin_detail_menu(cfg: dict, client: api_module.BinInventoryAPI, bin_data: dict) -> None:
     while True:
         b = bin_data
-        console.print()
+        _clear()
         _header(f"Bin : {b.get('binName', '')}")
 
         _field("Name",        b.get("binName", ""))
@@ -514,7 +515,7 @@ def items_in_bin_menu(cfg: dict, client: api_module.BinInventoryAPI, bin_data: d
             {"name": "<- Back",                "value": ("back", None)},
         ]
 
-        console.print()
+        _clear()
         _header(f"Items in : {bin_data['binName']}")
         if not items:
             console.print(f"  [yellow]No items in this bin.[/yellow]")
@@ -553,7 +554,7 @@ def all_items_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             return
 
         if not items:
-            console.print()
+            _clear()
             _header("My Items")
             console.print("  [yellow]No items found.[/yellow]")
             ask("  Press Enter to go back...")
@@ -575,7 +576,7 @@ def all_items_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             {"name": "<- Back",    "value": ("back", None)},
         ]
 
-        console.print()
+        _clear()
         _header("My Items")
         result = _fuzzy_pick(f"{len(items)} item(s) — type to filter, arrows to scroll:", choices)
         if result is None:
@@ -606,7 +607,7 @@ def item_detail_menu(
         images = _item_images(it)
         prev_bin_name = _prev_bin_name_from_item(it)
 
-        console.print()
+        _clear()
         _header(f"Item : {it.get('item', '')}")
 
         _field("Name",         it.get("item", ""))
@@ -771,9 +772,20 @@ def edit_item_view(
 
 def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
-        console.print()
+        _clear()
         _header("Search Items")
-        query = ask("  Search term (Enter to go back):")
+        console.print(
+            "  [cyan]────────────────────────────────────────────────[/cyan]"
+        )
+        console.print(
+            "  [cyan][[/cyan][bold cyan]1[/bold cyan][cyan]][/cyan][dim] Main  [/dim]"
+            "[cyan][[/cyan][bold cyan]2[/bold cyan][cyan]][/cyan][dim] Bins  [/dim]"
+            "[cyan][[/cyan][bold cyan]3[/bold cyan][cyan]][/cyan][dim] Items  [/dim]"
+            "[cyan][[/cyan][bold cyan]Esc[/bold cyan][cyan]][/cyan][dim] Back[/dim]"
+        )
+        console.print()
+
+        query = ask("  Search:")
         if not query:
             return
 
@@ -781,11 +793,13 @@ def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             data = client.search_items(query, cfg["userId"])
             items = data.get("items", [])
         except APIError:
-            console.print("  [yellow]No results found.[/yellow]")
-            continue
+            items = []
 
         if not items:
+            console.print()
             console.print("  [yellow]No results found.[/yellow]")
+            console.print()
+            ask("  Press Enter to search again...")
             continue
 
         choices = [
@@ -803,7 +817,11 @@ def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             {"name": "<- New Search", "value": ("back", None)},
         ]
 
-        result = _fuzzy_pick(f"Results for '{query}' ({len(items)}):", choices)
+        _clear()
+        _header(f"Search : {query}")
+        console.print(f"  [cyan]{len(items)} result(s)[/cyan]")
+        console.print()
+        result = _fuzzy_pick("Select item to open, or choose New Search:", choices)
         if result is None:
             continue
         action, payload = result
@@ -829,7 +847,7 @@ def shared_bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
         bins = []
 
     if not bins:
-        console.print()
+        _clear()
         _header("Shared Bins")
         console.print("  [yellow]No bins have been shared with you.[/yellow]")
         ask("  Press Enter to continue...")
@@ -850,7 +868,7 @@ def shared_bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             {"name": "<- Back", "value": ("back", None)},
         ]
 
-        console.print()
+        _clear()
         _header("Shared Bins")
         result = _fuzzy_pick(f"{len(bins)} shared bin(s):", choices)
         if result is None:
@@ -890,7 +908,7 @@ def shared_bin_items_view(cfg: dict, client: api_module.BinInventoryAPI, bin_dat
             {"name": "<- Back", "value": ("back", None)},
         ]
 
-        console.print()
+        _clear()
         _header(f"Shared : {bin_data['binName']}")
         result = _fuzzy_pick(f"{len(items)} item(s):", choices)
         if result is None:
@@ -914,7 +932,7 @@ def profile_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             show_error(str(e))
             return
 
-        console.print()
+        _clear()
         _header("My Profile")
         _field("Name",         user.get("name", ""))
         _field("Email",        user.get("email", ""))
@@ -937,7 +955,7 @@ def profile_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
 
 
 def edit_profile_view(cfg: dict, client: api_module.BinInventoryAPI, user: dict) -> None:
-    console.print()
+    _clear()
     _header("Edit Profile")
 
     name  = ask("Name:", default=user.get("name", ""))
@@ -974,7 +992,7 @@ def edit_profile_view(cfg: dict, client: api_module.BinInventoryAPI, user: dict)
 
 def settings_menu(cfg: dict) -> None:
     current = cfg.get("image_mode", "none")
-    console.print()
+    _clear()
     _header("Settings")
     _field("Image mode", current)
     console.print()
