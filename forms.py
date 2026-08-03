@@ -15,12 +15,25 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer
 from textual.screen import Screen
-from textual.widgets import DataTable, Input, Label, Select, Static, Switch
+from textual.widgets import DataTable, Input, Label, Select, Static, Switch  # Switch kept for RetroSwitch base
 
 
 # ── Retro widget subclasses ─────────────────────────────────────────────────────
+# In Textual 8.x, widget on_mount fires BEFORE App.on_mount, so any inline
+# styles we set get overwritten when self.dark=True triggers a CSS re-evaluation.
+# call_after_refresh() defers style application until after that settles.
 
 class RetroInput(Input):
+    def on_mount(self) -> None:
+        try:
+            self.styles.border = ("none", "transparent")
+        except Exception:
+            pass
+        self.app.call_after_refresh(self._init_color)
+
+    def _init_color(self) -> None:
+        self.styles.color = "white"
+
     def on_focus(self) -> None:
         self.styles.color = "#ffff55"
 
@@ -29,11 +42,41 @@ class RetroInput(Input):
 
 
 class RetroSelect(Select):
+    def on_mount(self) -> None:
+        self.app.call_after_refresh(self._init_color)
+
+    def _init_color(self) -> None:
+        self.styles.color = "white"
+
     def on_focus(self) -> None:
         self.styles.color = "#ffff55"
 
     def on_blur(self) -> None:
         self.styles.color = "white"
+
+
+class RetroSwitch(Switch):
+    def on_mount(self) -> None:
+        try:
+            self.styles.border = ("none", "transparent")
+        except Exception:
+            pass
+
+
+class _ImgCountWidget(Static):
+    """Focusable widget showing image count; Enter opens the image manager."""
+    can_focus = True
+
+    def on_key(self, event) -> None:
+        if event.key == "enter":
+            event.stop()
+            self.app.action_manage_images()
+
+    def on_focus(self) -> None:
+        self.styles.color = "#ffff55"
+
+    def on_blur(self) -> None:
+        self.styles.color = "#55ffff"
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -63,6 +106,8 @@ def _bin_id_from_item(item: dict) -> str:
 
 
 # ── Shared CSS ─────────────────────────────────────────────────────────────────
+# Using App.CSS (not DEFAULT_CSS) so our rules have higher priority than
+# widget-level DEFAULT_CSS, matching Textual's documented precedence order.
 
 _CSS = """
 Screen {
@@ -96,7 +141,7 @@ Screen {
     align: left middle;
 }
 .lbl {
-    width: 16;
+    width: 18;
     height: 1;
     content-align: right middle;
     color: #55ffff;
@@ -111,10 +156,19 @@ Input {
     height: 1;
     border: none;
     padding: 0 1;
+    color: white;
+    background: $surface;
+}
+Input > .input--value {
+    color: white;
+}
+Input > .input--placeholder {
+    color: #5555aa;
 }
 Select {
     width: 1fr;
     border: none;
+    color: white;
 }
 Switch {
     background: #000080;
@@ -136,6 +190,10 @@ Switch:focus {
     background: #000080;
     content-align: left middle;
     padding: 0 1;
+}
+.info-row:focus {
+    color: #ffff55;
+    background: #000060;
 }
 .curr-img {
     width: 1fr;
@@ -184,13 +242,11 @@ DataTable > .datatable--cursor {
 # ── Image manager screen ────────────────────────────────────────────────────────
 
 class _ImageManagerScreen(Screen):
-    """Pushed from the item form to let the user delete individual images."""
-
     BINDINGS = [
         Binding("escape", "done", "Done"),
         Binding("d", "delete_selected", "Delete"),
     ]
-    DEFAULT_CSS = _CSS
+    CSS = _CSS
 
     def __init__(self, images: List[str]) -> None:
         super().__init__()
@@ -239,11 +295,8 @@ class _ImageManagerScreen(Screen):
         self.app._remaining_images = list(self._images)
         try:
             n = len(self._images)
-            self.app.query_one("#img-count", Static).update(
-                (
-                    f"{n} image{'s' if n != 1 else ''}  —  "
-                    "[bold cyan]Ctrl+M[/bold cyan] to manage"
-                )
+            self.app.query_one("#img-count", _ImgCountWidget).update(
+                f"{n} image{'s' if n != 1 else ''}  —  Press [bold cyan]Enter[/bold cyan]"
                 if n > 0 else "No images remaining"
             )
         except Exception:
@@ -258,7 +311,7 @@ class _BinFormApp(App):
         Binding("ctrl+s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
     ]
-    DEFAULT_CSS = _CSS
+    CSS = _CSS
 
     def __init__(self, existing: Optional[dict] = None):
         super().__init__()
@@ -285,7 +338,7 @@ class _BinFormApp(App):
                 yield RetroInput(value=b.get("type", "") or "", id="bin_type")
             with Horizontal(classes="row"):
                 yield Label("Public :", classes="lbl")
-                yield Switch(value=bool(b.get("public", False)), id="public")
+                yield RetroSwitch(value=bool(b.get("public", False)), id="public")
                 yield Static("  Space to toggle ON / OFF", classes="toggle-hint")
             with Horizontal(classes="row"):
                 yield Label("Share with :", classes="lbl")
@@ -324,7 +377,7 @@ class _BinFormApp(App):
             "description": self.query_one("#description", Input).value.strip(),
             "location": self.query_one("#location", Input).value.strip(),
             "bin_type": self.query_one("#bin_type", Input).value.strip(),
-            "public": self.query_one("#public", Switch).value,
+            "public": self.query_one("#public", RetroSwitch).value,
             "sw_emails": self.query_one("#sw_emails", Input).value.strip(),
             "image_path": self.query_one("#image_path", Input).value.strip() or None,
         })
@@ -339,9 +392,8 @@ class _ItemFormApp(App):
     BINDINGS = [
         Binding("ctrl+s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
-        Binding("ctrl+m", "manage_images", "Manage Images"),
     ]
-    DEFAULT_CSS = _CSS
+    CSS = _CSS
 
     def __init__(
         self,
@@ -416,9 +468,8 @@ class _ItemFormApp(App):
                 n = len(self._remaining_images)
                 with Horizontal(classes="row"):
                     yield Label("Exist. imgs :", classes="lbl")
-                    yield Static(
-                        f"{n} image{'s' if n != 1 else ''}  —  "
-                        "[bold cyan]Ctrl+M[/bold cyan] to manage",
+                    yield _ImgCountWidget(
+                        f"{n} image{'s' if n != 1 else ''}  —  Press [bold cyan]Enter[/bold cyan]",
                         id="img-count",
                         classes="info-row",
                     )
@@ -426,8 +477,7 @@ class _ItemFormApp(App):
                 yield Label("New images :", classes="lbl")
                 yield RetroInput(value="", id="new_images", placeholder="comma-separated file paths")
         yield Static(
-            "  [bold cyan]Ctrl+S[/bold cyan]  Save    "
-            "[bold cyan]Ctrl+M[/bold cyan]  Manage images    "
+            "  [bold cyan]Ctrl+S[/bold cyan]  Save       "
             "[bold cyan]Esc[/bold cyan]  Cancel",
             id="footer",
         )
@@ -490,7 +540,7 @@ class _ProfileFormApp(App):
         Binding("ctrl+s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
     ]
-    DEFAULT_CSS = _CSS
+    CSS = _CSS
 
     def __init__(self, user: dict):
         super().__init__()
@@ -511,8 +561,8 @@ class _ProfileFormApp(App):
                 yield Label("About :", classes="lbl")
                 yield RetroInput(value=u.get("about", "") or "", id="about")
             with Horizontal(classes="row"):
-                yield Label("Show on users :", classes="lbl")
-                yield Switch(value=bool(u.get("showOnUsersPage", False)), id="show_on_users")
+                yield Label("Display on Users Page :", classes="lbl")
+                yield RetroSwitch(value=bool(u.get("showOnUsersPage", False)), id="show_on_users")
                 yield Static("  Space to toggle ON / OFF", classes="toggle-hint")
             with Horizontal(classes="row"):
                 yield Label("New password :", classes="lbl")
@@ -549,7 +599,7 @@ class _ProfileFormApp(App):
             "name": name,
             "email": email,
             "about": self.query_one("#about", Input).value.strip(),
-            "show_on_users_page": self.query_one("#show_on_users", Switch).value,
+            "show_on_users_page": self.query_one("#show_on_users", RetroSwitch).value,
             "password": self.query_one("#password", Input).value,
             "image_path": self.query_one("#image_path", Input).value.strip() or None,
         })
@@ -564,7 +614,7 @@ class _SearchFormApp(App):
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
     ]
-    DEFAULT_CSS = _CSS
+    CSS = _CSS
 
     def compose(self) -> ComposeResult:
         yield Static("BinInventory  --  Search Items", id="form-title")
