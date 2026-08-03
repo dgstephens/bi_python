@@ -2,20 +2,23 @@
 
 Public API
 ----------
-run_bin_form(existing=None)                              -> Optional[dict]
-run_item_form(bins, existing=None, preselect_bin_id=None) -> Optional[dict]
-run_search_form()                                        -> Optional[str]
-run_profile_form(user)                                   -> Optional[dict]
+run_bin_form(existing=None)                                         -> Optional[dict]
+run_item_form(bins, existing=None, preselect_bin_id=None,
+              image_mode="none")                                    -> Optional[dict]
+run_search_form()                                                   -> Optional[str]
+run_profile_form(user)                                              -> Optional[dict]
 """
 
+import asyncio
 from datetime import datetime
+from io import BytesIO
 from typing import List, Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer
 from textual.screen import Screen
-from textual.widgets import DataTable, Input, Label, Select, Static, Switch  # Switch kept for RetroSwitch base
+from textual.widgets import DataTable, Input, Label, Select, Static, Switch, TextArea
 
 
 # ── Retro widget subclasses ─────────────────────────────────────────────────────
@@ -41,8 +44,14 @@ class RetroInput(Input):
         self.styles.color = "white"
 
 
-class RetroSelect(Select):
+class RetroTextArea(TextArea):
+    """Multi-line text area styled to match the retro theme."""
+
     def on_mount(self) -> None:
+        try:
+            self.styles.border = ("none", "transparent")
+        except Exception:
+            pass
         self.app.call_after_refresh(self._init_color)
 
     def _init_color(self) -> None:
@@ -53,6 +62,36 @@ class RetroSelect(Select):
 
     def on_blur(self) -> None:
         self.styles.color = "white"
+
+
+class RetroSelect(Select):
+    def on_mount(self) -> None:
+        self.app.call_after_refresh(self._init_color)
+
+    def _init_color(self) -> None:
+        self.styles.color = "white"
+        # Force color on inner widgets (SelectCurrent, its Static child, etc.)
+        try:
+            for child in self.query("*"):
+                child.styles.color = "white"
+        except Exception:
+            pass
+
+    def on_focus(self) -> None:
+        self.styles.color = "#ffff55"
+        try:
+            for child in self.query("*"):
+                child.styles.color = "#ffff55"
+        except Exception:
+            pass
+
+    def on_blur(self) -> None:
+        self.styles.color = "white"
+        try:
+            for child in self.query("*"):
+                child.styles.color = "white"
+        except Exception:
+            pass
 
 
 class RetroSwitch(Switch):
@@ -105,6 +144,39 @@ def _bin_id_from_item(item: dict) -> str:
     return bid or ""
 
 
+def _image_to_renderable(url: str, mode: str):
+    """Download *url* and return a Rich renderable suitable for a Static widget.
+
+    Returns a Pixels object (ansi), an ASCII string (ascii), or None.
+    """
+    if not url or mode == "none":
+        return None
+    try:
+        import requests
+        from PIL import Image
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        w = 60
+        aspect = img.height / img.width
+
+        if mode == "ansi":
+            from rich_pixels import Pixels
+            h = max(1, int(w * aspect * 1.0))
+            return Pixels.from_image(img, resize=(w, h))
+
+        elif mode == "ascii":
+            import ascii_magic
+            if hasattr(ascii_magic, "AsciiArt"):
+                art = ascii_magic.AsciiArt.from_pillow_image(img)
+                return art.to_ascii(columns=w)
+            else:
+                return ascii_magic.from_pillow_image(img)
+
+    except Exception:
+        return None
+
+
 # ── Shared CSS ─────────────────────────────────────────────────────────────────
 # Using App.CSS (not DEFAULT_CSS) so our rules have higher priority than
 # widget-level DEFAULT_CSS, matching Textual's documented precedence order.
@@ -140,12 +212,26 @@ Screen {
     background: #000080;
     align: left middle;
 }
+.multirow {
+    height: 6;
+    margin-bottom: 1;
+    background: #000080;
+    align: left top;
+}
 .lbl {
     width: 18;
     height: 1;
     content-align: right middle;
     color: #55ffff;
     background: #000080;
+}
+.lbl-top {
+    width: 18;
+    height: 1;
+    content-align: right top;
+    color: #55ffff;
+    background: #000080;
+    padding-top: 0;
 }
 .lbl-req {
     color: #ffff55;
@@ -165,10 +251,31 @@ Input > .input--value {
 Input > .input--placeholder {
     color: #5555aa;
 }
+TextArea {
+    width: 1fr;
+    height: 5;
+    border: none;
+    padding: 0 1;
+    color: white;
+    background: $surface;
+}
 Select {
     width: 1fr;
     border: none;
     color: white;
+}
+SelectCurrent {
+    color: white;
+    background: $surface;
+    border: none;
+}
+SelectCurrent > Static {
+    color: white;
+}
+Select > .select--button {
+    color: white;
+    background: $surface;
+    border: none;
 }
 Switch {
     background: #000080;
@@ -219,6 +326,15 @@ Switch:focus {
     background: #000080;
     padding-left: 1;
 }
+#img-preview {
+    height: 16;
+    width: 1fr;
+    background: #000030;
+    color: #888888;
+    overflow: hidden;
+    padding: 0 1;
+    border-bottom: solid #005588;
+}
 #footer {
     height: 2;
     background: #000080;
@@ -248,13 +364,15 @@ class _ImageManagerScreen(Screen):
     ]
     CSS = _CSS
 
-    def __init__(self, images: List[str]) -> None:
+    def __init__(self, images: List[str], image_mode: str = "none") -> None:
         super().__init__()
         self._images = list(images)
+        self._image_mode = image_mode
 
     def compose(self) -> ComposeResult:
         yield Static("", id="form-title")
         yield Static("↑↓: select   D: delete   Esc: done", id="form-hint")
+        yield Static("[dim]Select an image to preview[/dim]", id="img-preview")
         yield DataTable(id="img-tbl", cursor_type="row", show_header=False)
         yield Static(
             "  [bold cyan]↑↓[/bold cyan]  Navigate    "
@@ -279,12 +397,30 @@ class _ImageManagerScreen(Screen):
             f"BinInventory  --  Manage Images  ({n} image{'s' if n != 1 else ''})"
         )
 
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        idx = event.cursor_row
+        if 0 <= idx < len(self._images):
+            url = self._images[idx]
+            preview = self.query_one("#img-preview", Static)
+            preview.update("[dim]Loading...[/dim]")
+            self.run_worker(self._fetch_preview(url), exclusive=True)
+
+    async def _fetch_preview(self, url: str) -> None:
+        loop = asyncio.get_event_loop()
+        renderable = await loop.run_in_executor(None, _image_to_renderable, url, self._image_mode)
+        try:
+            preview = self.query_one("#img-preview", Static)
+            preview.update(renderable if renderable is not None else "[dim](no preview available)[/dim]")
+        except Exception:
+            pass
+
     def action_delete_selected(self) -> None:
         tbl = self.query_one(DataTable)
         idx = tbl.cursor_row
         if self._images and 0 <= idx < len(self._images):
             self._images.pop(idx)
             self._rebuild()
+            self.query_one("#img-preview", Static).update("[dim]Select an image to preview[/dim]")
             if self._images:
                 try:
                     tbl.move_cursor(row=min(idx, len(self._images) - 1))
@@ -400,18 +536,20 @@ class _ItemFormApp(App):
         bins: list,
         existing: Optional[dict] = None,
         preselect_bin_id: Optional[str] = None,
+        image_mode: str = "none",
     ):
         super().__init__()
         self._bins = bins
         self._existing = existing or {}
         self._preselect_bin_id = preselect_bin_id
+        self._image_mode = image_mode
         self._remaining_images: List[str] = list(_item_images(self._existing))
 
     def compose(self) -> ComposeResult:
         it = self._existing
         title = f"BinInventory  --  {'Edit Item: ' + it['item'] if it else 'New Item'}"
         yield Static(title, id="form-title")
-        yield Static("Tab/Shift+Tab: move between fields", id="form-hint")
+        yield Static("Tab/Shift+Tab: move between fields   Ctrl+S: save   Esc: cancel", id="form-hint")
 
         current_bin_id = _bin_id_from_item(it) or self._preselect_bin_id
         bin_options = [(b["binName"], b["id"]) for b in self._bins]
@@ -424,12 +562,12 @@ class _ItemFormApp(App):
             with Horizontal(classes="row"):
                 yield Label("Bin :", classes="lbl lbl-req")
                 yield RetroSelect(options=bin_options, value=selected_bin, id="bin_id", allow_blank=False)
-            with Horizontal(classes="row"):
-                yield Label("Description :", classes="lbl")
-                yield RetroInput(value=it.get("description", "") or "", id="description")
-            with Horizontal(classes="row"):
-                yield Label("Story :", classes="lbl")
-                yield RetroInput(value=it.get("story", "") or "", id="story")
+            with Horizontal(classes="multirow"):
+                yield Label("Description :", classes="lbl lbl-top")
+                yield RetroTextArea(it.get("description", "") or "", id="description", tab_behavior="focus")
+            with Horizontal(classes="multirow"):
+                yield Label("Story :", classes="lbl lbl-top")
+                yield RetroTextArea(it.get("story", "") or "", id="story", tab_behavior="focus")
             with Horizontal(classes="row"):
                 yield Label("Type :", classes="lbl")
                 yield RetroInput(value=it.get("type", "") or "", id="item_type")
@@ -490,7 +628,7 @@ class _ItemFormApp(App):
         if not self._remaining_images:
             self.notify("No existing images to manage.", severity="warning")
             return
-        self.push_screen(_ImageManagerScreen(self._remaining_images))
+        self.push_screen(_ImageManagerScreen(self._remaining_images, image_mode=self._image_mode))
 
     def action_save(self) -> None:
         item_name = self.query_one("#item_name", Input).value.strip()
@@ -515,8 +653,8 @@ class _ItemFormApp(App):
         self.exit({
             "item": item_name,
             "bin_id": bin_id,
-            "description": self.query_one("#description", Input).value.strip(),
-            "story": self.query_one("#story", Input).value.strip(),
+            "description": self.query_one("#description", TextArea).text.strip(),
+            "story": self.query_one("#story", TextArea).text.strip(),
             "item_type": self.query_one("#item_type", Input).value.strip(),
             "quantity": self.query_one("#quantity", Input).value.strip(),
             "purchase_date": self.query_one("#purchase_date", Input).value.strip(),
@@ -651,8 +789,14 @@ def run_item_form(
     bins: list,
     existing: Optional[dict] = None,
     preselect_bin_id: Optional[str] = None,
+    image_mode: str = "none",
 ) -> Optional[dict]:
-    return _ItemFormApp(bins=bins, existing=existing, preselect_bin_id=preselect_bin_id).run()
+    return _ItemFormApp(
+        bins=bins,
+        existing=existing,
+        preselect_bin_id=preselect_bin_id,
+        image_mode=image_mode,
+    ).run()
 
 
 def run_search_form() -> Optional[str]:

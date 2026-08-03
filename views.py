@@ -708,7 +708,7 @@ def create_item_view(
         return
 
     preselect_id = preselect_bin["id"] if preselect_bin else None
-    result = run_item_form(bins=bins, preselect_bin_id=preselect_id)
+    result = run_item_form(bins=bins, preselect_bin_id=preselect_id, image_mode=cfg.get("image_mode", "none"))
     if result is None:
         return
 
@@ -740,7 +740,7 @@ def edit_item_view(
     it: dict,
     bins: list,
 ) -> Optional[dict]:
-    result = run_item_form(bins=bins, existing=it)
+    result = run_item_form(bins=bins, existing=it, image_mode=cfg.get("image_mode", "none"))
     if result is None:
         return None
     try:
