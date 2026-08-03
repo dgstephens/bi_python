@@ -9,7 +9,6 @@ from InquirerPy import inquirer as _inquirer
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
-from rich.panel import Panel
 from rich import box
 
 import config
@@ -20,19 +19,26 @@ from images import render_image
 
 console = Console()
 
+# Retro color palette: dark blue bg / cyan labels / white values / yellow hotkeys
 STYLE = questionary.Style([
-    ("qmark", "fg:#00d7ff bold"),
-    ("question", "bold"),
-    ("answer", "fg:#00d7ff bold"),
-    ("pointer", "fg:#00d7ff bold"),
-    ("highlighted", "fg:#00d7ff bold"),
-    ("selected", "fg:#00d7ff"),
-    ("separator", "fg:#555555"),
-    ("instruction", "fg:#555555"),
+    ("qmark",       "fg:#55ffff bold"),
+    ("question",    "fg:#ffffff bold"),
+    ("answer",      "fg:#ffff55 bold"),
+    ("pointer",     "fg:#ffff55 bold"),
+    ("highlighted", "fg:#ffff55 bold"),
+    ("selected",    "fg:#55ffff"),
+    ("separator",   "fg:#5555aa"),
+    ("instruction", "fg:#5555aa"),
 ])
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+class NavigateTo(Exception):
+    """Raised by shortcut_menu when a global nav key (1-4) is pressed."""
+    def __init__(self, dest: str):
+        self.dest = dest
+
+
+# ── Display helpers ────────────────────────────────────────────────────────────
 
 def fmt_date(date_str: Optional[str]) -> str:
     if not date_str:
@@ -44,12 +50,34 @@ def fmt_date(date_str: Optional[str]) -> str:
         return date_str[:10] if len(date_str) >= 10 else date_str
 
 
+def _header(title: str = "") -> None:
+    """Consistent full-width rule with app name and optional page title."""
+    if title:
+        console.rule(
+            f"[bold cyan] BinInventory [/bold cyan][cyan]|[/cyan][bold white] {title} [/bold white]",
+            style="cyan",
+        )
+    else:
+        console.rule("[bold cyan] BinInventory [/bold cyan]", style="cyan")
+    console.print()
+
+
+def _field(label: str, value: str, width: int = 14) -> None:
+    """Print one label : value row."""
+    v = str(value) if value not in (None, "") else "—"
+    console.print(f"  [cyan]{label.rjust(width)}[/cyan] : [white]{v}[/white]")
+
+
 def show_error(msg: str) -> None:
-    console.print(Panel(f"[red]{msg}[/red]", title="[red]Error[/red]", border_style="red"))
+    console.print()
+    console.print(f"  [bold red][ ERROR ][/bold red] [red]{msg}[/red]")
+    console.print()
 
 
 def show_success(msg: str) -> None:
-    console.print(Panel(f"[green]{msg}[/green]", title="[green]Success[/green]", border_style="green"))
+    console.print()
+    console.print(f"  [bold green][  OK  ][/bold green] [green]{msg}[/green]")
+    console.print()
 
 
 def ask(prompt: str, default: str = "") -> str:
@@ -68,16 +96,11 @@ def confirm(prompt: str, default: bool = False) -> bool:
 
 
 def sel(prompt: str, choices: list):
-    """Wrapper around questionary.select that returns the choice value or None."""
     return questionary.select(prompt, choices=choices, style=STYLE).ask()
 
 
 def _fuzzy_pick(prompt: str, choices: list):
-    """Fuzzy finder: full list shown, type to filter, arrow keys to scroll.
-
-    *choices* is a list of dicts with "name" (display) and "value" (returned).
-    Returns the selected value, or None if cancelled (Ctrl+C / Escape).
-    """
+    """Full list + type-to-filter + arrow keys. Returns value or None."""
     try:
         return _inquirer.fuzzy(
             message=prompt,
@@ -92,33 +115,53 @@ def _fuzzy_pick(prompt: str, choices: list):
 
 
 def shortcut_menu(prompt: str, items: list):
-    """Single-keypress shortcut menu.
+    """Single-keypress menu.
 
-    items: list of (label, shortcut_char, value) tuples, or None for a separator.
-    Displays each item as:  [X]  Label
-    Press the shortcut key to select immediately. Ctrl-C or Escape returns None.
+    Items: list of (label, shortcut_char, value) or None for separator.
+    Global nav keys always available: 1=Main 2=Bins 3=Items 4=Search.
+    Raises NavigateTo for global keys; returns None for Esc/Ctrl-C.
     """
     key_map = {}
 
     console.print()
     if prompt:
-        console.print(f"  [bold]{prompt}[/bold]")
+        console.print(f"  [bold white]{prompt}[/bold white]")
         console.print()
 
     for item in items:
         if item is None:
-            console.print("  [dim]──────────────────[/dim]")
+            console.print("  [cyan]────────────────────────────────[/cyan]")
             continue
         label, shortcut, value = item
         key_map[shortcut.lower()] = value
-        console.print(f"  [bold cyan]{escape('[' + shortcut.upper() + ']')}[/bold cyan]  {label}")
+        console.print(
+            f"  [bold yellow]{escape('[' + shortcut.upper() + ']')}[/bold yellow]"
+            f"  [white]{label}[/white]"
+        )
 
+    console.print()
+    console.print("  [cyan]────────────────────────────────────────────────[/cyan]")
+    console.print(
+        "  [cyan][[/cyan][bold cyan]1[/bold cyan][cyan]][/cyan][dim] Main  [/dim]"
+        "[cyan][[/cyan][bold cyan]2[/bold cyan][cyan]][/cyan][dim] Bins  [/dim]"
+        "[cyan][[/cyan][bold cyan]3[/bold cyan][cyan]][/cyan][dim] Items  [/dim]"
+        "[cyan][[/cyan][bold cyan]4[/bold cyan][cyan]][/cyan][dim] Search  [/dim]"
+        "[cyan][[/cyan][bold cyan]Esc[/bold cyan][cyan]][/cyan][dim] Back[/dim]"
+    )
     console.print()
 
     while True:
         key = readchar.readkey()
-        if key in ('\x03', '\x1b'):   # Ctrl-C or Escape
+        if key in ('\x03', '\x1b'):
             return None
+        if key == '1':
+            raise NavigateTo("main")
+        if key == '2':
+            raise NavigateTo("bins")
+        if key == '3':
+            raise NavigateTo("items")
+        if key == '4':
+            raise NavigateTo("search")
         if key.lower() in key_map:
             return key_map[key.lower()]
 
@@ -136,6 +179,8 @@ def ask_file_paths(prompt: str = "Image file paths (comma-separated, or Enter to
             console.print(f"  [yellow]File not found, skipping:[/yellow] {p}")
     return valid
 
+
+# ── Item/bin data helpers ──────────────────────────────────────────────────────
 
 def _bin_id_from_item(item: dict) -> str:
     bid = item.get("binId")
@@ -172,23 +217,20 @@ def _item_images(item: dict) -> List[str]:
     return [u for u in imgs if u]
 
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# ── Auth ───────────────────────────────────────────────────────────────────────
 
 def login_view(cfg: dict, client: api_module.BinInventoryAPI) -> dict:
     console.print()
-    console.print(Panel(
-        "[bold cyan]BinInventory CLI[/bold cyan]\n"
-        "[dim]Personal inventory management[/dim]",
-        border_style="cyan",
-        padding=(1, 4),
-    ))
+    _header("Login")
+    console.print("  [cyan]Personal inventory management[/cyan]")
+    console.print()
 
     while True:
         action = sel("", [
-            questionary.Choice("Login", value="login"),
+            questionary.Choice("Login",   value="login"),
             questionary.Choice("Sign up", value="signup"),
             questionary.Separator(),
-            questionary.Choice("Exit", value="exit"),
+            questionary.Choice("Exit",    value="exit"),
         ])
 
         if action is None or action == "exit":
@@ -204,9 +246,9 @@ def login_view(cfg: dict, client: api_module.BinInventoryAPI) -> dict:
             try:
                 result = client.login(email, password)
                 cfg.update({
-                    "token": result["token"],
+                    "token":  result["token"],
                     "userId": result["userId"],
-                    "email": result["email"],
+                    "email":  result["email"],
                 })
                 config.save(cfg)
                 client.token = result["token"]
@@ -216,23 +258,21 @@ def login_view(cfg: dict, client: api_module.BinInventoryAPI) -> dict:
                 show_error(str(e))
 
         elif action == "signup":
-            name = ask("Name:")
+            name  = ask("Name:")
             email = ask("Email:")
             password = ask_password("Password (min 8 chars):")
             show = confirm("Show profile on the users page?")
             image_paths = ask_file_paths("Profile image path (or Enter to skip):")
             try:
                 result = client.signup(
-                    name=name,
-                    email=email,
-                    password=password,
+                    name=name, email=email, password=password,
                     show_on_users_page=show,
                     image_path=image_paths[0] if image_paths else None,
                 )
                 cfg.update({
-                    "token": result["token"],
+                    "token":  result["token"],
                     "userId": result["userId"],
-                    "email": result["email"],
+                    "email":  result["email"],
                 })
                 config.save(cfg)
                 client.token = result["token"]
@@ -242,83 +282,86 @@ def login_view(cfg: dict, client: api_module.BinInventoryAPI) -> dict:
                 show_error(str(e))
 
 
-# ── Main menu ─────────────────────────────────────────────────────────────────
+# ── Main menu ──────────────────────────────────────────────────────────────────
 
 def main_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
+    """Top-level loop. Catches NavigateTo from any depth and re-routes."""
+    dest = "main"
     while True:
         try:
-            count_data = client.get_item_count(cfg["userId"])
-            item_count = count_data.get("number", "?")
-        except APIError:
-            item_count = "?"
-
-        console.print()
-        console.print(Panel(
-            f"[bold cyan]BinInventory CLI[/bold cyan]\n"
-            f"[dim]Logged in as:[/dim] [cyan]{cfg.get('email', '')}[/cyan]  "
-            f"[dim]Total items:[/dim] [cyan]{item_count}[/cyan]",
-            border_style="cyan",
-            padding=(0, 2),
-        ))
-
-        mode = cfg.get("image_mode", "none")
-        mode_label = {"none": "No images", "ansi": "ANSI color", "ascii": "ASCII art"}.get(mode, mode)
-        action = shortcut_menu("Main menu:", [
-            ("My Bins",                        'b', "bins"),
-            ("My Items",                       'i', "items"),
-            ("Search Items",                   's', "search"),
-            ("Shared Bins",                    'h', "shared"),   # sHared
-            ("My Profile",                     'p', "profile"),
-            (f"Settings  (images: {mode_label})", 't', "settings"),  # seTtings
-            None,
-            ("Logout",                         'l', "logout"),
-            ("Exit",                           'x', "exit"),
-        ])
-
-        if action is None or action == "exit":
+            if dest == "bins":
+                bins_menu(cfg, client)
+                dest = "main"
+            elif dest == "items":
+                all_items_menu(cfg, client)
+                dest = "main"
+            elif dest == "search":
+                search_menu(cfg, client)
+                dest = "main"
+            else:
+                dest = _main_dispatch(cfg, client)
+        except NavigateTo as e:
+            dest = e.dest
+        except KeyboardInterrupt:
+            print("\nBye!")
             sys.exit(0)
-        elif action == "logout":
-            config.clear_auth(cfg)
-            client.token = None
-            console.print("[cyan]Logged out.[/cyan]")
-            cfg = login_view(cfg, client)
-        elif action == "bins":
-            bins_menu(cfg, client)
-        elif action == "items":
-            all_items_menu(cfg, client)
-        elif action == "search":
-            search_menu(cfg, client)
-        elif action == "shared":
-            shared_bins_menu(cfg, client)
-        elif action == "profile":
-            profile_menu(cfg, client)
-        elif action == "settings":
-            settings_menu(cfg)
 
 
-# ── Bins ──────────────────────────────────────────────────────────────────────
+def _main_dispatch(cfg: dict, client: api_module.BinInventoryAPI) -> str:
+    """Show the main menu once, dispatch selection, return 'main'."""
+    try:
+        count_data = client.get_item_count(cfg["userId"])
+        item_count = count_data.get("number", "?")
+    except APIError:
+        item_count = "?"
 
-def _print_bins_table(bins: list) -> None:
-    table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan", padding=(0, 1))
-    table.add_column("#", style="dim", width=4)
-    table.add_column("Name", min_width=22)
-    table.add_column("Location", min_width=14)
-    table.add_column("Type", min_width=12)
-    table.add_column("Public", width=8)
-    table.add_column("Items", justify="right", width=6)
-
-    for i, b in enumerate(bins, 1):
-        table.add_row(
-            str(i),
-            b.get("binName", ""),
-            b.get("location", "") or "",
-            b.get("type", "") or "",
-            "[green]Yes[/green]" if b.get("public") else "No",
-            str(len(b.get("items", []))),
-        )
     console.print()
-    console.print(table)
+    _header()
+    console.print(
+        f"  [cyan]User[/cyan]  : [white]{cfg.get('email', '')}[/white]   "
+        f"[cyan]Items[/cyan] : [white]{item_count}[/white]"
+    )
+    console.print()
 
+    mode = cfg.get("image_mode", "none")
+    mode_label = {"none": "No images", "ansi": "ANSI color", "ascii": "ASCII art"}.get(mode, mode)
+
+    action = shortcut_menu("", [
+        ("My Bins",                       'b', "bins"),
+        ("My Items",                      'i', "items"),
+        ("Search Items",                  's', "search"),
+        ("Shared Bins",                   'h', "shared"),
+        ("My Profile",                    'p', "profile"),
+        (f"Settings  [{mode_label}]",     't', "settings"),
+        None,
+        ("Logout",                        'l', "logout"),
+        ("Exit",                          'x', "exit"),
+    ])
+
+    if action is None or action == "exit":
+        sys.exit(0)
+    elif action == "logout":
+        config.clear_auth(cfg)
+        client.token = None
+        console.print("  [cyan]Logged out.[/cyan]")
+        login_view(cfg, client)
+    elif action == "bins":
+        bins_menu(cfg, client)
+    elif action == "items":
+        all_items_menu(cfg, client)
+    elif action == "search":
+        search_menu(cfg, client)
+    elif action == "shared":
+        shared_bins_menu(cfg, client)
+    elif action == "profile":
+        profile_menu(cfg, client)
+    elif action == "settings":
+        settings_menu(cfg)
+
+    return "main"
+
+
+# ── Bins ───────────────────────────────────────────────────────────────────────
 
 def bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
@@ -334,18 +377,20 @@ def bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
                 "name": (
                     b["binName"]
                     + (f"  [{b['location']}]" if b.get("location") else "")
-                    + (f"  • {b['type']}" if b.get("type") else "")
+                    + (f"  {b['type']}" if b.get("type") else "")
                     + f"  ({len(b.get('items', []))} items)"
                 ),
                 "value": ("open", b),
             }
             for b in bins
         ] + [
-            {"name": "+ New Bin", "value": ("new", None)},
-            {"name": "← Back",   "value": ("back", None)},
+            {"name": "+ New Bin", "value": ("new",  None)},
+            {"name": "<- Back",   "value": ("back", None)},
         ]
 
-        result = _fuzzy_pick(f"My Bins ({len(bins)}):", choices)
+        console.print()
+        _header("My Bins")
+        result = _fuzzy_pick(f"{len(bins)} bin(s) — type to filter, arrows to scroll:", choices)
         if result is None:
             return
         action, payload = result
@@ -361,18 +406,18 @@ def bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
 def bin_detail_menu(cfg: dict, client: api_module.BinInventoryAPI, bin_data: dict) -> None:
     while True:
         b = bin_data
-        shared = ", ".join(b.get("sharedWith", [])) or "—"
-        details = (
-            f"[bold]{b.get('binName', '')}[/bold]\n\n"
-            f"  [dim]Description:[/dim] {b.get('description', '') or '—'}\n"
-            f"  [dim]Location:[/dim]    {b.get('location', '') or '—'}\n"
-            f"  [dim]Type:[/dim]        {b.get('type', '') or '—'}\n"
-            f"  [dim]Public:[/dim]      {'[green]Yes[/green]' if b.get('public') else 'No'}\n"
-            f"  [dim]Shared with:[/dim] {shared}\n"
-            f"  [dim]Items:[/dim]       {len(b.get('items', []))}"
-        )
         console.print()
-        console.print(Panel(details, title="Bin Details", border_style="cyan", padding=(0, 1)))
+        _header(f"Bin : {b.get('binName', '')}")
+
+        _field("Name",        b.get("binName", ""))
+        _field("Description", b.get("description", "") or "")
+        _field("Location",    b.get("location", "") or "")
+        _field("Type",        b.get("type", "") or "")
+        _field("Public",      "Yes" if b.get("public") else "No")
+        _field("Shared with", ", ".join(b.get("sharedWith", [])) or "")
+        _field("Items",       str(len(b.get("items", []))))
+        console.print()
+
         render_image(b.get("image", ""), cfg.get("image_mode", "none"))
 
         action = shortcut_menu("Bin actions:", [
@@ -454,21 +499,31 @@ def items_in_bin_menu(cfg: dict, client: api_module.BinInventoryAPI, bin_data: d
             show_error(str(e))
             return
 
-        if items:
-            _print_items_table(items)
-        else:
-            console.print(f"  [yellow]No items in '{bin_data['binName']}'.[/yellow]")
-
         choices = [
-            questionary.Choice(f"[{i}]  {it['item']}", value=("open", it))
-            for i, it in enumerate(items, 1)
+            {
+                "name": (
+                    it["item"]
+                    + (f"  [{it['type']}]" if it.get("type") else "")
+                    + (f"  qty:{it['quantity']}" if it.get("quantity") is not None else "")
+                ),
+                "value": ("open", it),
+            }
+            for it in items
         ] + [
-            questionary.Separator(),
-            questionary.Choice("+ Add Item to this Bin", value=("new", None)),
-            questionary.Choice("← Back", value=("back", None)),
+            {"name": "+ Add Item to this Bin", "value": ("new",  None)},
+            {"name": "<- Back",                "value": ("back", None)},
         ]
 
-        result = sel(f"Items in '{bin_data['binName']}' ({len(items)}):", choices)
+        console.print()
+        _header(f"Items in : {bin_data['binName']}")
+        if not items:
+            console.print(f"  [yellow]No items in this bin.[/yellow]")
+            console.print()
+
+        result = _fuzzy_pick(
+            f"{len(items)} item(s) — type to filter, arrows to scroll:",
+            choices,
+        )
         if result is None:
             return
         action, payload = result
@@ -486,29 +541,7 @@ def items_in_bin_menu(cfg: dict, client: api_module.BinInventoryAPI, bin_data: d
             item_detail_menu(cfg, client, payload, bins)
 
 
-# ── Items ─────────────────────────────────────────────────────────────────────
-
-def _print_items_table(items: list) -> None:
-    table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan", padding=(0, 1))
-    table.add_column("#", style="dim", width=4)
-    table.add_column("Name", min_width=22)
-    table.add_column("Bin", min_width=16)
-    table.add_column("Type", min_width=10)
-    table.add_column("Qty", justify="right", width=5)
-    table.add_column("Serial #", min_width=14)
-
-    for i, it in enumerate(items, 1):
-        table.add_row(
-            str(i),
-            it.get("item", ""),
-            _bin_name_from_item(it),
-            it.get("type", "") or "",
-            str(it.get("quantity", "")) if it.get("quantity") is not None else "",
-            it.get("serialNumber", "") or "",
-        )
-    console.print()
-    console.print(table)
-
+# ── Items ──────────────────────────────────────────────────────────────────────
 
 def all_items_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
@@ -520,15 +553,17 @@ def all_items_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             return
 
         if not items:
+            console.print()
+            _header("My Items")
             console.print("  [yellow]No items found.[/yellow]")
-            ask("Press Enter to go back...")
+            ask("  Press Enter to go back...")
             return
 
         choices = [
             {
                 "name": (
                     it["item"]
-                    + (f"  → {_bin_name_from_item(it)}" if _bin_name_from_item(it) else "")
+                    + (f"  -> {_bin_name_from_item(it)}" if _bin_name_from_item(it) else "")
                     + (f"  [{it['type']}]" if it.get("type") else "")
                     + (f"  qty:{it['quantity']}" if it.get("quantity") is not None else "")
                 ),
@@ -536,11 +571,13 @@ def all_items_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             }
             for it in items
         ] + [
-            {"name": "+ New Item", "value": ("new", None)},
-            {"name": "← Back",    "value": ("back", None)},
+            {"name": "+ New Item", "value": ("new",  None)},
+            {"name": "<- Back",    "value": ("back", None)},
         ]
 
-        result = _fuzzy_pick(f"My Items ({len(items)}):", choices)
+        console.print()
+        _header("My Items")
+        result = _fuzzy_pick(f"{len(items)} item(s) — type to filter, arrows to scroll:", choices)
         if result is None:
             return
         action, payload = result
@@ -569,38 +606,34 @@ def item_detail_menu(
         images = _item_images(it)
         prev_bin_name = _prev_bin_name_from_item(it)
 
-        details = (
-            f"[bold]{it.get('item', '')}[/bold]\n\n"
-            f"  [dim]Description:[/dim]    {it.get('description', '') or '—'}\n"
-            f"  [dim]Story / Notes:[/dim]  {it.get('story', '') or '—'}\n"
-            f"  [dim]Type:[/dim]           {it.get('type', '') or '—'}\n"
-            f"  [dim]Quantity:[/dim]       {it.get('quantity', '') if it.get('quantity') is not None else '—'}\n"
-            f"  [dim]Bin:[/dim]            {_bin_name_from_item(it) or '—'}\n"
-            f"  [dim]Previous Bin:[/dim]   {prev_bin_name or '—'}\n"
-            f"  [dim]Serial #:[/dim]       {it.get('serialNumber', '') or '—'}\n"
-            f"  [dim]Manufacturer:[/dim]   {it.get('manufacturer', '') or '—'}\n"
-            f"  [dim]Purchased from:[/dim] {it.get('purchasedFrom', '') or '—'}\n"
-            f"  [dim]Purchase date:[/dim]  {fmt_date(it.get('purchaseDate')) or '—'}\n"
-            f"  [dim]Purchase price:[/dim] {it.get('purchasePrice', '') if it.get('purchasePrice') is not None else '—'}\n"
-            f"  [dim]Date of mfg:[/dim]    {fmt_date(it.get('dateOfManufacture')) or '—'}\n"
-            f"  [dim]Images:[/dim]         {len(images)} image(s)"
-        )
-
         console.print()
-        console.print(Panel(details, title="Item Details", border_style="cyan", padding=(0, 1)))
+        _header(f"Item : {it.get('item', '')}")
+
+        _field("Name",         it.get("item", ""))
+        _field("Bin",          _bin_name_from_item(it))
+        _field("Prev. bin",    prev_bin_name)
+        _field("Description",  it.get("description", "") or "")
+        _field("Story",        it.get("story", "") or "")
+        _field("Type",         it.get("type", "") or "")
+        _field("Quantity",     str(it.get("quantity", "")) if it.get("quantity") is not None else "")
+        _field("Serial #",     it.get("serialNumber", "") or "")
+        _field("Manufacturer", it.get("manufacturer", "") or "")
+        _field("Purch. from",  it.get("purchasedFrom", "") or "")
+        _field("Purch. date",  fmt_date(it.get("purchaseDate")) or "")
+        _field("Price",        str(it.get("purchasePrice", "")) if it.get("purchasePrice") is not None else "")
+        _field("Mfr. date",    fmt_date(it.get("dateOfManufacture")) or "")
+        _field("Images",       f"{len(images)} image(s)")
+        console.print()
 
         if images:
             mode = cfg.get("image_mode", "none")
             if mode != "none":
                 render_image(images[0], mode)
                 if len(images) > 1:
-                    console.print(f"  [dim]+ {len(images) - 1} more image(s) — URLs:[/dim]")
-                    for url in images[1:]:
-                        console.print(f"    {url}")
+                    console.print(f"  [cyan]  + {len(images) - 1} more image(s)[/cyan]")
             else:
-                console.print("  [dim]Image URLs:[/dim]")
                 for url in images:
-                    console.print(f"    {url}")
+                    console.print(f"  [dim]{url}[/dim]")
 
         action_choices = [
             ("Edit Item",   'e', "edit"),
@@ -734,13 +767,13 @@ def edit_item_view(
         return None
 
 
-# ── Search ────────────────────────────────────────────────────────────────────
+# ── Search ─────────────────────────────────────────────────────────────────────
 
 def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
         console.print()
-        console.print(Panel("[bold]Search Items[/bold]", border_style="cyan", padding=(0, 2)))
-        query = ask("Search term (or Enter to go back):")
+        _header("Search Items")
+        query = ask("  Search term (Enter to go back):")
         if not query:
             return
 
@@ -759,7 +792,7 @@ def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             {
                 "name": (
                     it["item"]
-                    + (f"  → {_bin_name_from_item(it)}" if _bin_name_from_item(it) else "")
+                    + (f"  -> {_bin_name_from_item(it)}" if _bin_name_from_item(it) else "")
                     + (f"  [{it['type']}]" if it.get("type") else "")
                     + (f"  qty:{it['quantity']}" if it.get("quantity") is not None else "")
                 ),
@@ -767,7 +800,7 @@ def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             }
             for it in items
         ] + [
-            {"name": "← New Search", "value": ("back", None)},
+            {"name": "<- New Search", "value": ("back", None)},
         ]
 
         result = _fuzzy_pick(f"Results for '{query}' ({len(items)}):", choices)
@@ -786,54 +819,40 @@ def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             item_detail_menu(cfg, client, payload, bins)
 
 
-# ── Shared Bins ───────────────────────────────────────────────────────────────
+# ── Shared Bins ────────────────────────────────────────────────────────────────
 
 def shared_bins_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     try:
         data = client.get_shared_bins(cfg["userId"])
         bins = data.get("bin", [])
     except APIError:
-        console.print("  [yellow]No bins have been shared with you.[/yellow]")
-        ask("Press Enter to continue...")
-        return
+        bins = []
 
     if not bins:
+        console.print()
+        _header("Shared Bins")
         console.print("  [yellow]No bins have been shared with you.[/yellow]")
-        ask("Press Enter to continue...")
+        ask("  Press Enter to continue...")
         return
 
     while True:
-        table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan", padding=(0, 1))
-        table.add_column("#", style="dim", width=4)
-        table.add_column("Name", min_width=22)
-        table.add_column("Owner", min_width=16)
-        table.add_column("Location", min_width=14)
-        table.add_column("Items", justify="right", width=6)
-
-        for i, b in enumerate(bins, 1):
-            owner = ""
-            if isinstance(b.get("creator"), dict):
-                owner = b["creator"].get("name") or b["creator"].get("email", "")
-            table.add_row(
-                str(i),
-                b.get("binName", ""),
-                owner,
-                b.get("location", "") or "",
-                str(len(b.get("items", []))),
-            )
-
-        console.print()
-        console.print(table)
-
         choices = [
-            questionary.Choice(f"[{i}]  {b['binName']}", value=("open", b))
-            for i, b in enumerate(bins, 1)
+            {
+                "name": (
+                    b["binName"]
+                    + (f"  [{b.get('location', '')}]" if b.get("location") else "")
+                    + f"  ({len(b.get('items', []))} items)"
+                ),
+                "value": ("open", b),
+            }
+            for b in bins
         ] + [
-            questionary.Separator(),
-            questionary.Choice("← Back", value=("back", None)),
+            {"name": "<- Back", "value": ("back", None)},
         ]
 
-        result = sel(f"Shared Bins ({len(bins)}):", choices)
+        console.print()
+        _header("Shared Bins")
+        result = _fuzzy_pick(f"{len(bins)} shared bin(s):", choices)
         if result is None:
             return
         action, payload = result
@@ -854,21 +873,26 @@ def shared_bin_items_view(cfg: dict, client: api_module.BinInventoryAPI, bin_dat
 
     if not items:
         console.print(f"  [yellow]No items in '{bin_data['binName']}'.[/yellow]")
-        ask("Press Enter to continue...")
+        ask("  Press Enter to continue...")
         return
 
     while True:
-        _print_items_table(items)
-
         choices = [
-            questionary.Choice(f"[{i}]  {it['item']}", value=("open", it))
-            for i, it in enumerate(items, 1)
+            {
+                "name": (
+                    it["item"]
+                    + (f"  [{it['type']}]" if it.get("type") else "")
+                ),
+                "value": ("open", it),
+            }
+            for it in items
         ] + [
-            questionary.Separator(),
-            questionary.Choice("← Back", value=("back", None)),
+            {"name": "<- Back", "value": ("back", None)},
         ]
 
-        result = sel(f"Items in '{bin_data['binName']}':", choices)
+        console.print()
+        _header(f"Shared : {bin_data['binName']}")
+        result = _fuzzy_pick(f"{len(items)} item(s):", choices)
         if result is None:
             return
         action, payload = result
@@ -879,7 +903,7 @@ def shared_bin_items_view(cfg: dict, client: api_module.BinInventoryAPI, bin_dat
             item_detail_menu(cfg, client, payload, [])
 
 
-# ── Profile ───────────────────────────────────────────────────────────────────
+# ── Profile ────────────────────────────────────────────────────────────────────
 
 def profile_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
@@ -890,17 +914,15 @@ def profile_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
             show_error(str(e))
             return
 
-        details = (
-            f"[bold]{user.get('name', '')}[/bold]\n\n"
-            f"  [dim]Email:[/dim]         {user.get('email', '')}\n"
-            f"  [dim]About:[/dim]         {user.get('about', '') or '—'}\n"
-            f"  [dim]On users page:[/dim] {'[green]Yes[/green]' if user.get('showOnUsersPage') else 'No'}\n"
-            f"  [dim]Bins:[/dim]          {len(user.get('bins', []))}\n"
-            f"  [dim]Items:[/dim]         {len(user.get('items', []))}"
-        )
-
         console.print()
-        console.print(Panel(details, title="My Profile", border_style="cyan", padding=(0, 1)))
+        _header("My Profile")
+        _field("Name",         user.get("name", ""))
+        _field("Email",        user.get("email", ""))
+        _field("About",        user.get("about", "") or "")
+        _field("On users page", "Yes" if user.get("showOnUsersPage") else "No")
+        _field("Bins",         str(len(user.get("bins", []))))
+        _field("Items",        str(len(user.get("items", []))))
+        console.print()
 
         action = shortcut_menu("Profile actions:", [
             ("Edit Profile", 'e', "edit"),
@@ -915,17 +937,18 @@ def profile_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
 
 
 def edit_profile_view(cfg: dict, client: api_module.BinInventoryAPI, user: dict) -> None:
-    console.print(Panel("[bold]Edit Profile[/bold]", border_style="cyan"))
+    console.print()
+    _header("Edit Profile")
 
-    name = ask("Name:", default=user.get("name", ""))
+    name  = ask("Name:", default=user.get("name", ""))
     email = ask("Email:", default=user.get("email", ""))
     about = ask("About:", default=user.get("about", "") or "")
-    show = confirm("Show profile on the users page?", default=bool(user.get("showOnUsersPage")))
+    show  = confirm("Show profile on the users page?", default=bool(user.get("showOnUsersPage")))
 
     console.print("  [dim]Leave password blank to keep your current password.[/dim]")
     password = ask_password("New password (min 8 chars, or Enter to skip):")
 
-    console.print(f"  [dim]Current image:[/dim] {user.get('image', '—')}")
+    console.print(f"  [cyan]Current image[/cyan] : [dim]{user.get('image', '—')}[/dim]")
     image_paths = ask_file_paths("New profile image path (or Enter to keep current):")
 
     try:
@@ -947,24 +970,21 @@ def edit_profile_view(cfg: dict, client: api_module.BinInventoryAPI, user: dict)
         show_error(str(e))
 
 
-# ── Settings ──────────────────────────────────────────────────────────────────
+# ── Settings ───────────────────────────────────────────────────────────────────
 
 def settings_menu(cfg: dict) -> None:
     current = cfg.get("image_mode", "none")
     console.print()
-    console.print(Panel(
-        f"[bold]Settings[/bold]\n\n"
-        f"  [dim]Current image mode:[/dim] [cyan]{current}[/cyan]",
-        border_style="cyan",
-        padding=(0, 1),
-    ))
+    _header("Settings")
+    _field("Image mode", current)
+    console.print()
 
     mode = shortcut_menu("Image display mode:", [
-        ("No images  — fastest, works on any terminal",          'n', "none"),
-        ("ANSI color blocks  — pixel-art look, color terminal",  'a', "ansi"),
-        ("ASCII art  — monochrome, works everywhere",            's', "ascii"),  # aSCII
+        ("No images  — fastest, works everywhere",           'n', "none"),
+        ("ANSI color blocks  — pixel-art, color terminal",   'a', "ansi"),
+        ("ASCII art  — monochrome, works everywhere",        's', "ascii"),
         None,
-        ("Back (no change)",                                     'b', "back"),
+        ("Back (no change)",                                 'b', "back"),
     ])
 
     if mode is None or mode == "back":

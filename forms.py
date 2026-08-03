@@ -45,68 +45,108 @@ def _bin_id_from_item(item: dict) -> str:
     return bid or ""
 
 
-# ── Shared CSS ─────────────────────────────────────────────────────────────────
+# ── Shared CSS — retro VT100 phosphor aesthetic ────────────────────────────────
 
 _CSS = """
 Screen {
+    background: #000080;
+    color: #ffffff;
     overflow: auto;
-    background: $surface;
 }
 #form-title {
-    background: $primary;
-    color: $text;
-    height: 3;
-    content-align: center middle;
+    background: #008888;
+    color: #000000;
+    height: 1;
+    padding: 0 1;
     text-style: bold;
 }
 #form-hint {
-    color: $text-muted;
+    background: #000080;
+    color: #5555aa;
     height: 1;
-    text-align: center;
-    padding: 0 2;
+    padding: 0 1;
+    border-bottom: solid #005588;
 }
 #fields {
-    padding: 1 4;
+    padding: 1 1;
+    background: #000080;
     height: auto;
 }
 .row {
-    height: auto;
+    height: 1;
     margin-bottom: 1;
+    background: #000080;
     align: left middle;
 }
 .lbl {
-    width: 20;
-    height: 3;
-    content-align: left middle;
-    padding-right: 1;
-    color: $text-muted;
+    width: 16;
+    height: 1;
+    content-align: right middle;
+    color: #55ffff;
+    background: #000080;
 }
 .lbl-req {
-    color: $accent;
+    color: #ffff55;
+    text-style: bold;
 }
 Input {
     width: 1fr;
-    height: 3;
+    height: 1;
+    border: none;
+    background: #000050;
+    color: #ffffff;
+    padding: 0 1;
+}
+Input:focus {
+    background: #000068;
+    border: none;
+    color: #ffff55;
 }
 Select {
     width: 1fr;
+    background: #000050;
+    color: #ffffff;
+    border: none;
+}
+Select:focus {
+    background: #000068;
+    color: #ffff55;
 }
 Switch {
-    height: 3;
+    background: #000080;
+    height: 1;
+    border: none;
 }
 #img-note {
-    color: $text-muted;
-    height: 3;
-    content-align: left middle;
+    color: #5555aa;
+    height: 1;
     width: 1fr;
+    content-align: left middle;
+    background: #000080;
+    padding-left: 1;
 }
 #buttons {
-    height: 5;
+    height: 3;
     align: center middle;
+    background: #000080;
+    border-top: solid #005588;
     margin-top: 1;
 }
 Button {
-    margin: 0 1;
+    background: #000080;
+    color: #55ffff;
+    border: solid #005588;
+    margin: 0 2;
+    min-width: 14;
+}
+Button:focus {
+    background: #000060;
+    color: #ffff55;
+    border: solid #55ffff;
+}
+Button.-primary {
+    color: #ffff55;
+    border: solid #55ffff;
 }
 """
 
@@ -126,43 +166,43 @@ class _BinFormApp(App):
 
     def compose(self) -> ComposeResult:
         b = self._existing
-        title = f"Edit Bin: {b['binName']}" if b else "New Bin"
+        title = f"BinInventory  --  {'Edit Bin: ' + b['binName'] if b else 'New Bin'}"
         yield Static(title, id="form-title")
         yield Static(
-            "Tab / Shift+Tab to navigate  •  Ctrl+S to save  •  Esc to cancel",
+            "Tab/Shift+Tab: move   Ctrl+S: save   Esc: cancel",
             id="form-hint",
         )
         with ScrollableContainer(id="fields"):
             with Horizontal(classes="row"):
-                yield Label("Name *", classes="lbl lbl-req")
-                yield Input(value=b.get("binName", ""), id="bin_name", placeholder="Required")
+                yield Label("Name :", classes="lbl lbl-req")
+                yield Input(value=b.get("binName", ""), id="bin_name", placeholder="required")
             with Horizontal(classes="row"):
-                yield Label("Description", classes="lbl")
+                yield Label("Description :", classes="lbl")
                 yield Input(value=b.get("description", "") or "", id="description")
             with Horizontal(classes="row"):
-                yield Label("Location", classes="lbl")
+                yield Label("Location :", classes="lbl")
                 yield Input(value=b.get("location", "") or "", id="location")
             with Horizontal(classes="row"):
-                yield Label("Type", classes="lbl")
+                yield Label("Type :", classes="lbl")
                 yield Input(value=b.get("type", "") or "", id="bin_type")
             with Horizontal(classes="row"):
-                yield Label("Public", classes="lbl")
+                yield Label("Public :", classes="lbl")
                 yield Switch(value=bool(b.get("public", False)), id="public")
             with Horizontal(classes="row"):
-                yield Label("Share with", classes="lbl")
+                yield Label("Share with :", classes="lbl")
                 yield Input(
                     value=" ".join(b.get("sharedWith", [])),
                     id="sw_emails",
-                    placeholder="space-separated email addresses",
+                    placeholder="space-separated emails",
                 )
             with Horizontal(classes="row"):
-                yield Label("Image path", classes="lbl")
+                yield Label("Image :", classes="lbl")
                 current_img = b.get("image", "")
-                ph = f"leave blank to keep existing" if current_img else "file path or leave blank"
+                ph = "leave blank to keep existing" if current_img else "file path or leave blank"
                 yield Input(value="", id="image_path", placeholder=ph)
         with Horizontal(id="buttons"):
-            yield Button("Save  (Ctrl+S)", variant="primary", id="save")
-            yield Button("Cancel  (Esc)", id="cancel")
+            yield Button("[ SAVE ]", variant="primary", id="save")
+            yield Button("[ CANCEL ]", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one("#bin_name", Input).focus()
@@ -215,10 +255,10 @@ class _ItemFormApp(App):
 
     def compose(self) -> ComposeResult:
         it = self._existing
-        title = f"Edit Item: {it['item']}" if it else "New Item"
+        title = f"BinInventory  --  {'Edit Item: ' + it['item'] if it else 'New Item'}"
         yield Static(title, id="form-title")
         yield Static(
-            "Tab / Shift+Tab to navigate  •  Ctrl+S to save  •  Esc to cancel",
+            "Tab/Shift+Tab: move   Ctrl+S: save   Esc: cancel",
             id="form-hint",
         )
 
@@ -229,67 +269,67 @@ class _ItemFormApp(App):
 
         with ScrollableContainer(id="fields"):
             with Horizontal(classes="row"):
-                yield Label("Name *", classes="lbl lbl-req")
-                yield Input(value=it.get("item", ""), id="item_name", placeholder="Required")
+                yield Label("Name :", classes="lbl lbl-req")
+                yield Input(value=it.get("item", ""), id="item_name", placeholder="required")
             with Horizontal(classes="row"):
-                yield Label("Bin *", classes="lbl lbl-req")
+                yield Label("Bin :", classes="lbl lbl-req")
                 yield Select(options=bin_options, value=selected_bin, id="bin_id", allow_blank=False)
             with Horizontal(classes="row"):
-                yield Label("Description", classes="lbl")
+                yield Label("Description :", classes="lbl")
                 yield Input(value=it.get("description", "") or "", id="description")
             with Horizontal(classes="row"):
-                yield Label("Story / Notes", classes="lbl")
+                yield Label("Story :", classes="lbl")
                 yield Input(value=it.get("story", "") or "", id="story")
             with Horizontal(classes="row"):
-                yield Label("Type", classes="lbl")
+                yield Label("Type :", classes="lbl")
                 yield Input(value=it.get("type", "") or "", id="item_type")
             with Horizontal(classes="row"):
-                yield Label("Quantity", classes="lbl")
+                yield Label("Quantity :", classes="lbl")
                 qty = str(it.get("quantity", "")) if it.get("quantity") is not None else ""
                 yield Input(value=qty, id="quantity")
             with Horizontal(classes="row"):
-                yield Label("Purchase date", classes="lbl")
+                yield Label("Purch. date :", classes="lbl")
                 yield Input(
                     value=_fmt_date(it.get("purchaseDate")),
                     id="purchase_date",
                     placeholder="YYYY-MM-DD",
                 )
             with Horizontal(classes="row"):
-                yield Label("Purchased from", classes="lbl")
+                yield Label("Purch. from :", classes="lbl")
                 yield Input(value=it.get("purchasedFrom", "") or "", id="purchased_from")
             with Horizontal(classes="row"):
-                yield Label("Manufacturer", classes="lbl")
+                yield Label("Mfr. :", classes="lbl")
                 yield Input(value=it.get("manufacturer", "") or "", id="manufacturer")
             with Horizontal(classes="row"):
-                yield Label("Mfg. date", classes="lbl")
+                yield Label("Mfr. date :", classes="lbl")
                 yield Input(
                     value=_fmt_date(it.get("dateOfManufacture")),
                     id="date_of_manufacture",
                     placeholder="YYYY-MM-DD",
                 )
             with Horizontal(classes="row"):
-                yield Label("Serial number", classes="lbl")
+                yield Label("Serial # :", classes="lbl")
                 yield Input(value=it.get("serialNumber", "") or "", id="serial_number")
             with Horizontal(classes="row"):
-                yield Label("Purchase price", classes="lbl")
+                yield Label("Price :", classes="lbl")
                 price = str(it.get("purchasePrice", "")) if it.get("purchasePrice") is not None else ""
                 yield Input(value=price, id="purchase_price")
             if existing_imgs:
                 with Horizontal(classes="row"):
-                    yield Label("Keep images", classes="lbl")
+                    yield Label("Keep imgs :", classes="lbl")
                     yield Switch(value=True, id="keep_images")
                 with Horizontal(classes="row"):
                     yield Label("", classes="lbl")
                     yield Static(
-                        f"{len(existing_imgs)} existing image(s)  —  toggle off to remove all",
+                        f"{len(existing_imgs)} existing  (toggle off to remove all)",
                         id="img-note",
                     )
             with Horizontal(classes="row"):
-                yield Label("New images", classes="lbl")
+                yield Label("New imgs :", classes="lbl")
                 yield Input(value="", id="new_images", placeholder="comma-separated file paths")
         with Horizontal(id="buttons"):
-            yield Button("Save  (Ctrl+S)", variant="primary", id="save")
-            yield Button("Cancel  (Esc)", id="cancel")
+            yield Button("[ SAVE ]", variant="primary", id="save")
+            yield Button("[ CANCEL ]", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one("#item_name", Input).focus()
