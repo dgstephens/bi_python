@@ -14,7 +14,7 @@ from rich import box
 import config
 import api as api_module
 from api import APIError
-from forms import run_bin_form, run_item_form, run_search_form
+from forms import run_bin_form, run_item_form, run_search_form, run_profile_form
 from images import render_image
 
 console = Console()
@@ -943,33 +943,22 @@ def profile_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
 
 
 def edit_profile_view(cfg: dict, client: api_module.BinInventoryAPI, user: dict) -> None:
-    _clear()
-    _header("Edit Profile")
-
-    name  = ask("Name:", default=user.get("name", ""))
-    email = ask("Email:", default=user.get("email", ""))
-    about = ask("About:", default=user.get("about", "") or "")
-    show  = confirm("Show profile on the users page?", default=bool(user.get("showOnUsersPage")))
-
-    console.print("  [dim]Leave password blank to keep your current password.[/dim]")
-    password = ask_password("New password (min 8 chars, or Enter to skip):")
-
-    console.print(f"  [cyan]Current image[/cyan] : [dim]{user.get('image', '—')}[/dim]")
-    image_paths = ask_file_paths("New profile image path (or Enter to keep current):")
-
+    result = run_profile_form(user)
+    if result is None:
+        return
     try:
         client.update_user(
             user_id=cfg["userId"],
-            name=name,
-            email=email,
-            about=about,
-            password=password,
-            show_on_users_page=show,
-            image_path=image_paths[0] if image_paths else None,
+            name=result["name"],
+            email=result["email"],
+            about=result["about"],
+            password=result["password"],
+            show_on_users_page=result["show_on_users_page"],
+            image_path=result["image_path"],
             current_image=user.get("image", ""),
         )
-        if email != cfg.get("email"):
-            cfg["email"] = email
+        if result["email"] != cfg.get("email"):
+            cfg["email"] = result["email"]
             config.save(cfg)
         show_success("Profile updated.")
     except APIError as e:

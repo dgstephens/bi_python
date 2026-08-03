@@ -5,10 +5,7 @@ Public API
 run_bin_form(existing=None)                              -> Optional[dict]
 run_item_form(bins, existing=None, preselect_bin_id=None) -> Optional[dict]
 run_search_form()                                        -> Optional[str]
-
-Returns a dict of field values on save, or None on cancel.
-All fields are shown at once; Tab / Shift+Tab to move between them,
-Ctrl+S to save, Escape to cancel.
+run_profile_form(user)                                   -> Optional[dict]
 """
 
 from datetime import datetime
@@ -17,19 +14,15 @@ from typing import List, Optional
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer
-from textual.widgets import Input, Label, Select, Static, Switch
+from textual.screen import Screen
+from textual.widgets import DataTable, Input, Label, Select, Static, Switch
 
 
 # ── Retro widget subclasses ─────────────────────────────────────────────────────
-# We do NOT override Input background/color in CSS — Textual's dark-theme
-# defaults give white text on a contrasting background which is readable.
-# We only tweak the foreground color on focus via inline styles, which reliably
-# highlights the active field even if the CSS color rules lose the specificity
-# battle against Input.DEFAULT_CSS.
 
 class RetroInput(Input):
     def on_focus(self) -> None:
-        self.styles.color = "#ffff55"   # yellow when active
+        self.styles.color = "#ffff55"
 
     def on_blur(self) -> None:
         self.styles.color = "white"
@@ -69,7 +62,7 @@ def _bin_id_from_item(item: dict) -> str:
     return bid or ""
 
 
-# ── Shared CSS — retro VT100 phosphor aesthetic ────────────────────────────────
+# ── Shared CSS ─────────────────────────────────────────────────────────────────
 
 _CSS = """
 Screen {
@@ -136,6 +129,14 @@ Switch:focus {
     border: none;
     background: #000060;
 }
+.info-row {
+    width: 1fr;
+    height: 1;
+    color: #55ffff;
+    background: #000080;
+    content-align: left middle;
+    padding: 0 1;
+}
 .curr-img {
     width: 1fr;
     height: 1;
@@ -167,7 +168,87 @@ Switch:focus {
     padding: 0 2;
     align: left middle;
 }
+DataTable {
+    height: 1fr;
+    margin: 1 1;
+    background: #000050;
+    border: none;
+}
+DataTable > .datatable--cursor {
+    background: #000068;
+    color: #ffff55;
+}
 """
+
+
+# ── Image manager screen ────────────────────────────────────────────────────────
+
+class _ImageManagerScreen(Screen):
+    """Pushed from the item form to let the user delete individual images."""
+
+    BINDINGS = [
+        Binding("escape", "done", "Done"),
+        Binding("d", "delete_selected", "Delete"),
+    ]
+    DEFAULT_CSS = _CSS
+
+    def __init__(self, images: List[str]) -> None:
+        super().__init__()
+        self._images = list(images)
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="form-title")
+        yield Static("↑↓: select   D: delete   Esc: done", id="form-hint")
+        yield DataTable(id="img-tbl", cursor_type="row", show_header=False)
+        yield Static(
+            "  [bold cyan]↑↓[/bold cyan]  Navigate    "
+            "[bold cyan]D[/bold cyan]  Delete selected    "
+            "[bold cyan]Esc[/bold cyan]  Done",
+            id="footer",
+        )
+
+    def on_mount(self) -> None:
+        self.app.dark = True
+        tbl = self.query_one(DataTable)
+        tbl.add_column("Image", width=80)
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        tbl = self.query_one(DataTable)
+        tbl.clear()
+        for url in self._images:
+            tbl.add_row(url.split("/")[-1])
+        n = len(self._images)
+        self.query_one("#form-title", Static).update(
+            f"BinInventory  --  Manage Images  ({n} image{'s' if n != 1 else ''})"
+        )
+
+    def action_delete_selected(self) -> None:
+        tbl = self.query_one(DataTable)
+        idx = tbl.cursor_row
+        if self._images and 0 <= idx < len(self._images):
+            self._images.pop(idx)
+            self._rebuild()
+            if self._images:
+                try:
+                    tbl.move_cursor(row=min(idx, len(self._images) - 1))
+                except Exception:
+                    pass
+
+    def action_done(self) -> None:
+        self.app._remaining_images = list(self._images)
+        try:
+            n = len(self._images)
+            self.app.query_one("#img-count", Static).update(
+                (
+                    f"{n} image{'s' if n != 1 else ''}  —  "
+                    "[bold cyan]Ctrl+M[/bold cyan] to manage"
+                )
+                if n > 0 else "No images remaining"
+            )
+        except Exception:
+            pass
+        self.app.pop_screen()
 
 
 # ── Bin form ───────────────────────────────────────────────────────────────────
@@ -187,10 +268,7 @@ class _BinFormApp(App):
         b = self._existing
         title = f"BinInventory  --  {'Edit Bin: ' + b['binName'] if b else 'New Bin'}"
         yield Static(title, id="form-title")
-        yield Static(
-            "Tab/Shift+Tab: move between fields",
-            id="form-hint",
-        )
+        yield Static("Tab/Shift+Tab: move between fields", id="form-hint")
         current_img = b.get("image", "")
         with ScrollableContainer(id="fields"):
             with Horizontal(classes="row"):
@@ -232,6 +310,7 @@ class _BinFormApp(App):
         )
 
     def on_mount(self) -> None:
+        self.dark = True
         self.query_one("#bin_name", Input).focus()
 
     def action_save(self) -> None:
@@ -260,6 +339,7 @@ class _ItemFormApp(App):
     BINDINGS = [
         Binding("ctrl+s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
+        Binding("ctrl+m", "manage_images", "Manage Images"),
     ]
     DEFAULT_CSS = _CSS
 
@@ -273,20 +353,17 @@ class _ItemFormApp(App):
         self._bins = bins
         self._existing = existing or {}
         self._preselect_bin_id = preselect_bin_id
+        self._remaining_images: List[str] = list(_item_images(self._existing))
 
     def compose(self) -> ComposeResult:
         it = self._existing
         title = f"BinInventory  --  {'Edit Item: ' + it['item'] if it else 'New Item'}"
         yield Static(title, id="form-title")
-        yield Static(
-            "Tab/Shift+Tab: move between fields",
-            id="form-hint",
-        )
+        yield Static("Tab/Shift+Tab: move between fields", id="form-hint")
 
         current_bin_id = _bin_id_from_item(it) or self._preselect_bin_id
         bin_options = [(b["binName"], b["id"]) for b in self._bins]
         selected_bin = current_bin_id if current_bin_id else (bin_options[0][1] if bin_options else None)
-        existing_imgs = _item_images(it)
 
         with ScrollableContainer(id="fields"):
             with Horizontal(classes="row"):
@@ -335,28 +412,35 @@ class _ItemFormApp(App):
                 yield Label("Price :", classes="lbl")
                 price = str(it.get("purchasePrice", "")) if it.get("purchasePrice") is not None else ""
                 yield RetroInput(value=price, id="purchase_price")
-            if existing_imgs:
+            if self._remaining_images:
+                n = len(self._remaining_images)
                 with Horizontal(classes="row"):
-                    yield Label("Keep imgs :", classes="lbl")
-                    yield Switch(value=True, id="keep_images")
-                    yield Static("  Space to toggle ON / OFF", classes="toggle-hint")
-                with Horizontal(classes="row"):
-                    yield Label("", classes="lbl")
+                    yield Label("Exist. imgs :", classes="lbl")
                     yield Static(
-                        f"{len(existing_imgs)} existing  (toggle off to remove all)",
-                        id="img-note",
+                        f"{n} image{'s' if n != 1 else ''}  —  "
+                        "[bold cyan]Ctrl+M[/bold cyan] to manage",
+                        id="img-count",
+                        classes="info-row",
                     )
             with Horizontal(classes="row"):
-                yield Label("New imgs :", classes="lbl")
+                yield Label("New images :", classes="lbl")
                 yield RetroInput(value="", id="new_images", placeholder="comma-separated file paths")
         yield Static(
-            "  [bold cyan]Ctrl+S[/bold cyan]  Save       "
+            "  [bold cyan]Ctrl+S[/bold cyan]  Save    "
+            "[bold cyan]Ctrl+M[/bold cyan]  Manage images    "
             "[bold cyan]Esc[/bold cyan]  Cancel",
             id="footer",
         )
 
     def on_mount(self) -> None:
+        self.dark = True
         self.query_one("#item_name", Input).focus()
+
+    def action_manage_images(self) -> None:
+        if not self._remaining_images:
+            self.notify("No existing images to manage.", severity="warning")
+            return
+        self.push_screen(_ImageManagerScreen(self._remaining_images))
 
     def action_save(self) -> None:
         item_name = self.query_one("#item_name", Input).value.strip()
@@ -370,15 +454,6 @@ class _ItemFormApp(App):
         if bin_id is Select.BLANK or not bin_id:
             self.notify("Please select a bin", severity="error")
             return
-
-        it = self._existing
-        existing_imgs = _item_images(it)
-
-        try:
-            keep = self.query_one("#keep_images", Switch).value
-        except Exception:
-            keep = True
-        kept = existing_imgs if keep else []
 
         new_raw = ""
         try:
@@ -400,8 +475,83 @@ class _ItemFormApp(App):
             "date_of_manufacture": self.query_one("#date_of_manufacture", Input).value.strip(),
             "serial_number": self.query_one("#serial_number", Input).value.strip(),
             "purchase_price": self.query_one("#purchase_price", Input).value.strip(),
-            "existing_images": kept,
+            "existing_images": self._remaining_images,
             "new_image_paths": new_paths or None,
+        })
+
+    def action_cancel(self) -> None:
+        self.exit(None)
+
+
+# ── Profile form ───────────────────────────────────────────────────────────────
+
+class _ProfileFormApp(App):
+    BINDINGS = [
+        Binding("ctrl+s", "save", "Save"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+    DEFAULT_CSS = _CSS
+
+    def __init__(self, user: dict):
+        super().__init__()
+        self._user = user
+
+    def compose(self) -> ComposeResult:
+        yield Static("BinInventory  --  Edit Profile", id="form-title")
+        yield Static("Tab/Shift+Tab: move between fields", id="form-hint")
+        u = self._user
+        with ScrollableContainer(id="fields"):
+            with Horizontal(classes="row"):
+                yield Label("Name :", classes="lbl lbl-req")
+                yield RetroInput(value=u.get("name", "") or "", id="name")
+            with Horizontal(classes="row"):
+                yield Label("Email :", classes="lbl lbl-req")
+                yield RetroInput(value=u.get("email", "") or "", id="email")
+            with Horizontal(classes="row"):
+                yield Label("About :", classes="lbl")
+                yield RetroInput(value=u.get("about", "") or "", id="about")
+            with Horizontal(classes="row"):
+                yield Label("Show on users :", classes="lbl")
+                yield Switch(value=bool(u.get("showOnUsersPage", False)), id="show_on_users")
+                yield Static("  Space to toggle ON / OFF", classes="toggle-hint")
+            with Horizontal(classes="row"):
+                yield Label("New password :", classes="lbl")
+                yield RetroInput(
+                    value="", id="password", password=True,
+                    placeholder="leave blank to keep current",
+                )
+            if u.get("image"):
+                img_name = u["image"].split("/")[-1]
+                with Horizontal(classes="row"):
+                    yield Label("Curr. img :", classes="lbl")
+                    yield Static(img_name, classes="curr-img")
+            with Horizontal(classes="row"):
+                yield Label("New img :", classes="lbl")
+                ph = "file path (leave blank to keep current)" if u.get("image") else "file path or leave blank"
+                yield RetroInput(value="", id="image_path", placeholder=ph)
+        yield Static(
+            "  [bold cyan]Ctrl+S[/bold cyan]  Save       "
+            "[bold cyan]Esc[/bold cyan]  Cancel",
+            id="footer",
+        )
+
+    def on_mount(self) -> None:
+        self.dark = True
+        self.query_one("#name", Input).focus()
+
+    def action_save(self) -> None:
+        name = self.query_one("#name", Input).value.strip()
+        email = self.query_one("#email", Input).value.strip()
+        if not name or not email:
+            self.notify("Name and email are required", severity="error")
+            return
+        self.exit({
+            "name": name,
+            "email": email,
+            "about": self.query_one("#about", Input).value.strip(),
+            "show_on_users_page": self.query_one("#show_on_users", Switch).value,
+            "password": self.query_one("#password", Input).value,
+            "image_path": self.query_one("#image_path", Input).value.strip() or None,
         })
 
     def action_cancel(self) -> None:
@@ -430,6 +580,7 @@ class _SearchFormApp(App):
         )
 
     def on_mount(self) -> None:
+        self.dark = True
         self.query_one("#query", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -443,7 +594,6 @@ class _SearchFormApp(App):
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def run_bin_form(existing: Optional[dict] = None) -> Optional[dict]:
-    """Show the bin form. Returns field dict on save, None on cancel."""
     return _BinFormApp(existing=existing).run()
 
 
@@ -452,14 +602,12 @@ def run_item_form(
     existing: Optional[dict] = None,
     preselect_bin_id: Optional[str] = None,
 ) -> Optional[dict]:
-    """Show the item form. Returns field dict on save, None on cancel."""
-    return _ItemFormApp(
-        bins=bins,
-        existing=existing,
-        preselect_bin_id=preselect_bin_id,
-    ).run()
+    return _ItemFormApp(bins=bins, existing=existing, preselect_bin_id=preselect_bin_id).run()
 
 
 def run_search_form() -> Optional[str]:
-    """Show search input. Returns query string or None on cancel/Esc."""
     return _SearchFormApp().run()
+
+
+def run_profile_form(user: dict) -> Optional[dict]:
+    return _ProfileFormApp(user=user).run()
