@@ -774,15 +774,7 @@ def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
         _clear()
         _header("Search Items")
-        console.print(
-            "  [cyan]────────────────────────────────────────────────[/cyan]"
-        )
-        console.print(
-            "  [cyan][[/cyan][bold cyan]1[/bold cyan][cyan]][/cyan][dim] Main  [/dim]"
-            "[cyan][[/cyan][bold cyan]2[/bold cyan][cyan]][/cyan][dim] Bins  [/dim]"
-            "[cyan][[/cyan][bold cyan]3[/bold cyan][cyan]][/cyan][dim] Items  [/dim]"
-            "[cyan][[/cyan][bold cyan]Esc[/bold cyan][cyan]][/cyan][dim] Back[/dim]"
-        )
+        console.print("  [dim]Type a search term and press Enter.  Esc / blank = back.[/dim]")
         console.print()
 
         query = ask("  Search:")

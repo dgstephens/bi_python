@@ -16,7 +16,40 @@ from typing import List, Optional
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer
-from textual.widgets import Button, Footer, Input, Label, Select, Static, Switch
+from textual.widgets import Button, Input, Label, Select, Static, Switch
+
+
+# ── Retro widget subclasses ─────────────────────────────────────────────────────
+# Textual's Input and Select DEFAULT_CSS overrides App-level CSS color rules in
+# newer versions. Setting inline styles in on_mount / on_focus / on_blur is the
+# reliable workaround.
+
+class RetroInput(Input):
+    def on_mount(self) -> None:
+        self.styles.color = "white"
+        self.styles.background = "#000050"
+
+    def on_focus(self) -> None:
+        self.styles.color = "#ffff55"
+        self.styles.background = "#000068"
+
+    def on_blur(self) -> None:
+        self.styles.color = "white"
+        self.styles.background = "#000050"
+
+
+class RetroSelect(Select):
+    def on_mount(self) -> None:
+        self.styles.color = "white"
+        self.styles.background = "#000050"
+
+    def on_focus(self) -> None:
+        self.styles.color = "#ffff55"
+        self.styles.background = "#000068"
+
+    def on_blur(self) -> None:
+        self.styles.color = "white"
+        self.styles.background = "#000050"
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -94,28 +127,43 @@ Input {
     height: 1;
     border: none;
     background: #000050;
-    color: #ffffff;
+    color: white;
     padding: 0 1;
-}
-Input:focus {
-    background: #000068;
-    border: none;
-    color: #ffff55;
 }
 Select {
     width: 1fr;
     background: #000050;
-    color: #ffffff;
+    color: white;
     border: none;
-}
-Select:focus {
-    background: #000068;
-    color: #ffff55;
 }
 Switch {
     background: #000080;
     height: 1;
     border: none;
+    color: #55ffff;
+}
+Switch.-on {
+    color: #ffff55;
+}
+Switch:focus {
+    border: none;
+    background: #000060;
+}
+.curr-img {
+    width: 1fr;
+    height: 1;
+    color: #5555aa;
+    background: #000080;
+    content-align: left middle;
+    padding: 0 1;
+}
+.toggle-hint {
+    width: 1fr;
+    height: 1;
+    color: #5555aa;
+    background: #000080;
+    content-align: left middle;
+    padding: 0 1;
 }
 #img-note {
     color: #5555aa;
@@ -172,34 +220,40 @@ class _BinFormApp(App):
             "Tab/Shift+Tab: move   Ctrl+S: save   Esc: cancel",
             id="form-hint",
         )
+        current_img = b.get("image", "")
         with ScrollableContainer(id="fields"):
             with Horizontal(classes="row"):
                 yield Label("Name :", classes="lbl lbl-req")
-                yield Input(value=b.get("binName", ""), id="bin_name", placeholder="required")
+                yield RetroInput(value=b.get("binName", ""), id="bin_name", placeholder="required")
             with Horizontal(classes="row"):
                 yield Label("Description :", classes="lbl")
-                yield Input(value=b.get("description", "") or "", id="description")
+                yield RetroInput(value=b.get("description", "") or "", id="description")
             with Horizontal(classes="row"):
                 yield Label("Location :", classes="lbl")
-                yield Input(value=b.get("location", "") or "", id="location")
+                yield RetroInput(value=b.get("location", "") or "", id="location")
             with Horizontal(classes="row"):
                 yield Label("Type :", classes="lbl")
-                yield Input(value=b.get("type", "") or "", id="bin_type")
+                yield RetroInput(value=b.get("type", "") or "", id="bin_type")
             with Horizontal(classes="row"):
                 yield Label("Public :", classes="lbl")
                 yield Switch(value=bool(b.get("public", False)), id="public")
+                yield Static("  Space to toggle ON / OFF", classes="toggle-hint")
             with Horizontal(classes="row"):
                 yield Label("Share with :", classes="lbl")
-                yield Input(
+                yield RetroInput(
                     value=" ".join(b.get("sharedWith", [])),
                     id="sw_emails",
                     placeholder="space-separated emails",
                 )
+            if current_img:
+                img_name = current_img.split("/")[-1]
+                with Horizontal(classes="row"):
+                    yield Label("Curr. img :", classes="lbl")
+                    yield Static(img_name, classes="curr-img")
             with Horizontal(classes="row"):
-                yield Label("Image :", classes="lbl")
-                current_img = b.get("image", "")
-                ph = "leave blank to keep existing" if current_img else "file path or leave blank"
-                yield Input(value="", id="image_path", placeholder=ph)
+                yield Label("New img :", classes="lbl")
+                ph = "file path (leave blank to keep current)" if current_img else "file path or leave blank"
+                yield RetroInput(value="", id="image_path", placeholder=ph)
         with Horizontal(id="buttons"):
             yield Button("[ SAVE ]", variant="primary", id="save")
             yield Button("[ CANCEL ]", id="cancel")
@@ -270,54 +324,55 @@ class _ItemFormApp(App):
         with ScrollableContainer(id="fields"):
             with Horizontal(classes="row"):
                 yield Label("Name :", classes="lbl lbl-req")
-                yield Input(value=it.get("item", ""), id="item_name", placeholder="required")
+                yield RetroInput(value=it.get("item", ""), id="item_name", placeholder="required")
             with Horizontal(classes="row"):
                 yield Label("Bin :", classes="lbl lbl-req")
-                yield Select(options=bin_options, value=selected_bin, id="bin_id", allow_blank=False)
+                yield RetroSelect(options=bin_options, value=selected_bin, id="bin_id", allow_blank=False)
             with Horizontal(classes="row"):
                 yield Label("Description :", classes="lbl")
-                yield Input(value=it.get("description", "") or "", id="description")
+                yield RetroInput(value=it.get("description", "") or "", id="description")
             with Horizontal(classes="row"):
                 yield Label("Story :", classes="lbl")
-                yield Input(value=it.get("story", "") or "", id="story")
+                yield RetroInput(value=it.get("story", "") or "", id="story")
             with Horizontal(classes="row"):
                 yield Label("Type :", classes="lbl")
-                yield Input(value=it.get("type", "") or "", id="item_type")
+                yield RetroInput(value=it.get("type", "") or "", id="item_type")
             with Horizontal(classes="row"):
                 yield Label("Quantity :", classes="lbl")
                 qty = str(it.get("quantity", "")) if it.get("quantity") is not None else ""
-                yield Input(value=qty, id="quantity")
+                yield RetroInput(value=qty, id="quantity")
             with Horizontal(classes="row"):
                 yield Label("Purch. date :", classes="lbl")
-                yield Input(
+                yield RetroInput(
                     value=_fmt_date(it.get("purchaseDate")),
                     id="purchase_date",
                     placeholder="YYYY-MM-DD",
                 )
             with Horizontal(classes="row"):
                 yield Label("Purch. from :", classes="lbl")
-                yield Input(value=it.get("purchasedFrom", "") or "", id="purchased_from")
+                yield RetroInput(value=it.get("purchasedFrom", "") or "", id="purchased_from")
             with Horizontal(classes="row"):
                 yield Label("Mfr. :", classes="lbl")
-                yield Input(value=it.get("manufacturer", "") or "", id="manufacturer")
+                yield RetroInput(value=it.get("manufacturer", "") or "", id="manufacturer")
             with Horizontal(classes="row"):
                 yield Label("Mfr. date :", classes="lbl")
-                yield Input(
+                yield RetroInput(
                     value=_fmt_date(it.get("dateOfManufacture")),
                     id="date_of_manufacture",
                     placeholder="YYYY-MM-DD",
                 )
             with Horizontal(classes="row"):
                 yield Label("Serial # :", classes="lbl")
-                yield Input(value=it.get("serialNumber", "") or "", id="serial_number")
+                yield RetroInput(value=it.get("serialNumber", "") or "", id="serial_number")
             with Horizontal(classes="row"):
                 yield Label("Price :", classes="lbl")
                 price = str(it.get("purchasePrice", "")) if it.get("purchasePrice") is not None else ""
-                yield Input(value=price, id="purchase_price")
+                yield RetroInput(value=price, id="purchase_price")
             if existing_imgs:
                 with Horizontal(classes="row"):
                     yield Label("Keep imgs :", classes="lbl")
                     yield Switch(value=True, id="keep_images")
+                    yield Static("  Space to toggle ON / OFF", classes="toggle-hint")
                 with Horizontal(classes="row"):
                     yield Label("", classes="lbl")
                     yield Static(
@@ -326,7 +381,7 @@ class _ItemFormApp(App):
                     )
             with Horizontal(classes="row"):
                 yield Label("New imgs :", classes="lbl")
-                yield Input(value="", id="new_images", placeholder="comma-separated file paths")
+                yield RetroInput(value="", id="new_images", placeholder="comma-separated file paths")
         with Horizontal(id="buttons"):
             yield Button("[ SAVE ]", variant="primary", id="save")
             yield Button("[ CANCEL ]", id="cancel")
