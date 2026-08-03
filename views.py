@@ -113,7 +113,7 @@ def _fuzzy_pick(prompt: str, choices: list):
             max_height="70%",
             border=True,
             match_exact=False,
-            keybindings={"skip": [{"key": "escape"}]},
+            keybindings={"interrupt": [{"key": "escape"}]},
         ).execute()
     except KeyboardInterrupt:
         return None
@@ -169,6 +169,47 @@ def shortcut_menu(prompt: str, items: list):
             raise NavigateTo("search")
         if key.lower() in key_map:
             return key_map[key.lower()]
+
+
+def _retro_input(prompt: str) -> Optional[str]:
+    """Single-line input using readchar so Esc reliably cancels.
+
+    Returns the entered string (may be empty), or None if Esc/Ctrl-C is pressed.
+    """
+    import sys
+    console.print(f"  [bold cyan]{prompt}[/bold cyan] ", end="")
+    sys.stdout.write("\033[93m")  # yellow text for typed characters
+    sys.stdout.flush()
+
+    buf: List[str] = []
+    try:
+        while True:
+            ch = readchar.readkey()
+            if ch == "\x03":  # Ctrl-C
+                sys.stdout.write("\033[0m\n")
+                sys.stdout.flush()
+                raise KeyboardInterrupt
+            if ch == "\x1b":  # Esc → cancel
+                sys.stdout.write("\033[0m\n")
+                sys.stdout.flush()
+                return None
+            if ch in ("\r", "\n"):  # Enter → submit
+                sys.stdout.write("\033[0m\n")
+                sys.stdout.flush()
+                return "".join(buf)
+            if ch in ("\x7f", "\x08"):  # Backspace
+                if buf:
+                    buf.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+            elif len(ch) == 1 and ch.isprintable():
+                buf.append(ch)
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+    except Exception:
+        sys.stdout.write("\033[0m\n")
+        sys.stdout.flush()
+        return None
 
 
 def ask_file_paths(prompt: str = "Image file paths (comma-separated, or Enter to skip):") -> List[str]:
@@ -777,8 +818,8 @@ def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
         console.print("  [dim]Type a search term and press Enter.  Esc / blank = back.[/dim]")
         console.print()
 
-        query = ask("  Search:")
-        if not query:
+        query = _retro_input("Search:")
+        if not query:  # None (Esc) or empty string
             return
 
         try:
