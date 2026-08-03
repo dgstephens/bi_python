@@ -68,13 +68,22 @@ def _render_ansi(img) -> None:
 
 
 def _render_ascii(img) -> None:
-    """Render as monochrome ASCII art."""
+    """Render as monochrome ASCII art. Supports ascii_magic 1.x and 2.x."""
     try:
         import ascii_magic
         w = _target_width()
-        output = ascii_magic.from_pillow_image(img)
-        ascii_magic.to_terminal(output, columns=w)
-        print()  # newline after ascii_magic output
+        # ascii_magic 2.x: functions are methods on AsciiArt class
+        if hasattr(ascii_magic, "AsciiArt"):
+            art = ascii_magic.AsciiArt.from_pillow_image(img)
+            if hasattr(art, "to_terminal"):
+                art.to_terminal(columns=w)
+            else:
+                print(art.to_ascii(columns=w))
+        else:
+            # ascii_magic 1.x: module-level functions
+            output = ascii_magic.from_pillow_image(img)
+            ascii_magic.to_terminal(output, columns=w)
+        print()
     except ImportError:
         console.print("  [dim](ascii_magic not installed — run: pip install ascii_magic)[/dim]")
     except Exception as e:
