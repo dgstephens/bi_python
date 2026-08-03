@@ -14,7 +14,7 @@ from rich import box
 import config
 import api as api_module
 from api import APIError
-from forms import run_bin_form, run_item_form
+from forms import run_bin_form, run_item_form, run_search_form
 from images import render_image
 
 console = Console()
@@ -170,46 +170,6 @@ def shortcut_menu(prompt: str, items: list):
         if key.lower() in key_map:
             return key_map[key.lower()]
 
-
-def _retro_input(prompt: str) -> Optional[str]:
-    """Single-line input using readchar so Esc reliably cancels.
-
-    Returns the entered string (may be empty), or None if Esc/Ctrl-C is pressed.
-    """
-    import sys
-    console.print(f"  [bold cyan]{prompt}[/bold cyan] ", end="")
-    sys.stdout.write("\033[93m")  # yellow text for typed characters
-    sys.stdout.flush()
-
-    buf: List[str] = []
-    try:
-        while True:
-            ch = readchar.readkey()
-            if ch == "\x03":  # Ctrl-C
-                sys.stdout.write("\033[0m\n")
-                sys.stdout.flush()
-                raise KeyboardInterrupt
-            if ch == "\x1b":  # Esc → cancel
-                sys.stdout.write("\033[0m\n")
-                sys.stdout.flush()
-                return None
-            if ch in ("\r", "\n"):  # Enter → submit
-                sys.stdout.write("\033[0m\n")
-                sys.stdout.flush()
-                return "".join(buf)
-            if ch in ("\x7f", "\x08"):  # Backspace
-                if buf:
-                    buf.pop()
-                    sys.stdout.write("\b \b")
-                    sys.stdout.flush()
-            elif len(ch) == 1 and ch.isprintable():
-                buf.append(ch)
-                sys.stdout.write(ch)
-                sys.stdout.flush()
-    except Exception:
-        sys.stdout.write("\033[0m\n")
-        sys.stdout.flush()
-        return None
 
 
 def ask_file_paths(prompt: str = "Image file paths (comma-separated, or Enter to skip):") -> List[str]:
@@ -813,13 +773,8 @@ def edit_item_view(
 
 def search_menu(cfg: dict, client: api_module.BinInventoryAPI) -> None:
     while True:
-        _clear()
-        _header("Search Items")
-        console.print("  [dim]Type a search term and press Enter.  Esc / blank = back.[/dim]")
-        console.print()
-
-        query = _retro_input("Search:")
-        if not query:  # None (Esc) or empty string
+        query = run_search_form()
+        if not query:
             return
 
         try:

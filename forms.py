@@ -445,6 +445,43 @@ class _ItemFormApp(App):
             self.action_cancel()
 
 
+# ── Search form ────────────────────────────────────────────────────────────────
+
+class _SearchFormApp(App):
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+    DEFAULT_CSS = _CSS
+
+    def compose(self) -> ComposeResult:
+        yield Static("BinInventory  --  Search Items", id="form-title")
+        yield Static("Enter: search   Esc: back", id="form-hint")
+        with ScrollableContainer(id="fields"):
+            with Horizontal(classes="row"):
+                yield Label("Search :", classes="lbl lbl-req")
+                yield RetroInput(id="query", placeholder="type to search...")
+        with Horizontal(id="buttons"):
+            yield Button("[ SEARCH ]", variant="primary", id="search")
+            yield Button("[ CANCEL ]", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#query", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        query = event.value.strip()
+        self.exit(query if query else None)
+
+    def action_cancel(self) -> None:
+        self.exit(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "search":
+            query = self.query_one("#query", Input).value.strip()
+            self.exit(query if query else None)
+        elif event.button.id == "cancel":
+            self.action_cancel()
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def run_bin_form(existing: Optional[dict] = None) -> Optional[dict]:
@@ -463,3 +500,8 @@ def run_item_form(
         existing=existing,
         preselect_bin_id=preselect_bin_id,
     ).run()
+
+
+def run_search_form() -> Optional[str]:
+    """Show search input. Returns query string or None on cancel/Esc."""
+    return _SearchFormApp().run()
